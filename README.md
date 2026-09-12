@@ -9,6 +9,11 @@ apresenta probabilidade de êxito. Toda afirmação do relatório carrega a cita
 conferida contra o texto original da decisão — e afirmação sem essa conferência é removida antes
 de chegar à tela.
 
+**Começando pelo funcionamento:** [`docs/como-funciona.html`](docs/como-funciona.html) explica, em
+uma página pronta para virar PDF (abra no navegador e use `Cmd+P` → *Salvar como PDF*), o que cada
+uma das 11 etapas recebe, faz e devolve, quais delas chamam um modelo de linguagem — são quatro — e
+com que prompt exatamente elas o chamam.
+
 Documentação: [`contexto-geral.md`](contexto-geral.md) (arquitetura e decisões),
 [`historias-usuario/`](historias-usuario/) (38 HUs em 12 épicos),
 [`docs/escopo.md`](docs/escopo.md) (escopo e não-objetivos),

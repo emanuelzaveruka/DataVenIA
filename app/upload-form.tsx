@@ -6,10 +6,13 @@ import type { PipelineEvent, PipelineResultPayload } from "../lib/workflow/run-p
 import {
   buildPipelineProgress,
   type PipelineProgressStep,
+  type PipelineStepStatus,
 } from "../lib/observability/pipeline-progress";
+import { GLOSSARY, PROGRESS_GLOSSARY_KEYS } from "../lib/config/glossary";
 import { readNdjson } from "../lib/streaming/ndjson";
 import { ReportView } from "./report-view";
 import { N8nExecutionView } from "./components/n8n-execution-view";
+import { HelpHint } from "./components/help-hint";
 
 type UploadSuccess = PipelineResultPayload;
 
@@ -131,6 +134,7 @@ export function UploadForm() {
   // duplicada à mão aqui — e que, de quebra, citava um stage inexistente (SCRATCHPAD_SELECTION).
   const displayProgress =
     result?.progress ?? liveProgress ?? (isSubmitting ? buildPipelineProgress({}) : null);
+  const hasFailure = displayProgress?.some((step) => step.status === "FAILED") ?? false;
   const timelineEvents = result?.stages ?? liveStages;
   const hasTimeline = timelineEvents.length > 0;
 
@@ -205,18 +209,26 @@ export function UploadForm() {
           </div>
           <ul className="flex flex-col gap-2">
             {displayProgress.map((step, index) => {
-              const isCurrentStep = isSubmitting && !step.done && (index === 0 || displayProgress[index - 1]?.done);
+              // A etapa em curso é a primeira ainda não alcançada — mas só enquanto a execução
+              // está viva: depois de uma falha, o giro do spinner mentiria sobre algo parado.
+              const helpKey = PROGRESS_GLOSSARY_KEYS[index];
+              const isCurrentStep =
+                isSubmitting &&
+                !hasFailure &&
+                step.status === "PENDING" &&
+                (index === 0 || displayProgress[index - 1]?.status !== "PENDING");
               return (
                 <li key={`${step.stage}-${step.label}`} className="flex items-center gap-2.5">
                   {isCurrentStep ? (
                     <LoadingSpinner className="h-3.5 w-3.5 text-brand-navy dark:text-brand-cream" />
                   ) : (
-                    <StatusDot status={step.done ? "COMPLETED" : undefined} />
+                    <StatusDot status={step.status} />
                   )}
                   <span className={isCurrentStep ? "font-medium text-ink-900 dark:text-ink-050" : "text-ink-600 dark:text-ink-400"}>
                     {step.label}
                     {typeof step.count === "number" ? ` (${step.count})` : ""}
                   </span>
+                  {helpKey && <HelpHint entry={GLOSSARY[helpKey]} status={step.status} />}
                 </li>
               );
             })}
@@ -247,15 +259,22 @@ export function UploadForm() {
               {result.fileName} · {result.metadata.pageCount ? `${result.metadata.pageCount} página(s)` : ""}
             </p>
             {result.provider && (
-              <p className="mt-2 text-xs text-ink-600 dark:text-ink-400">
-                Execução {result.runId} · {result.provider.llm}/{result.provider.model} · jurisprudência{" "}
-                {result.provider.jurisprudence}
+              <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-ink-600 dark:text-ink-400">
+                <span>
+                  Execução {result.runId} · {result.provider.llm}/{result.provider.model}
+                </span>
+                <HelpHint entry={GLOSSARY.execucaoLinha} />
+                <span>· jurisprudência {result.provider.jurisprudence}</span>
+                <HelpHint entry={GLOSSARY.fonteJurisprudencia} />
               </p>
             )}
             {result.scratchpads && (
-              <p className="mt-1 text-xs text-ink-600 dark:text-ink-400">
-                Scratchpads: {result.scratchpads.processed}/{result.scratchpads.requested}
-                {result.scratchpads.failed > 0 ? ` · ${result.scratchpads.failed} falha(s)` : ""}
+              <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink-600 dark:text-ink-400">
+                <span>
+                  Scratchpads: {result.scratchpads.processed}/{result.scratchpads.requested}
+                  {result.scratchpads.failed > 0 ? ` · ${result.scratchpads.failed} falha(s)` : ""}
+                </span>
+                <HelpHint entry={GLOSSARY.scratchpadsRatio} />
               </p>
             )}
             {result.redactions.length > 0 && (
@@ -302,13 +321,18 @@ export function UploadForm() {
  * sem o texto acessível, "concluída" e "pendente" seriam a mesma bolinha em escala de cinza e no
  * leitor de tela.
  */
-function StatusDot({ status }: { status: "COMPLETED" | "FAILED" | undefined }) {
+function StatusDot({ status }: { status: PipelineStepStatus }) {
+  // EMPTY fica em neutro de propósito: "rodou e não achou nada" costuma ser a regra
+  // anti-alucinação funcionando, não defeito — pintar de vermelho acusaria a aplicação de um erro
+  // que não houve. Só FAILED é vermelho, e ele existe justamente para não sobrar como pendente.
   const { shape, label } =
-    status === "COMPLETED"
+    status === "DONE"
       ? { shape: "bg-green-ink dark:bg-green-light", label: "concluída" }
       : status === "FAILED"
         ? { shape: "bg-danger dark:bg-danger-dark", label: "falhou" }
-        : { shape: "border-2 border-ink-500", label: "pendente" };
+        : status === "EMPTY"
+          ? { shape: "border-2 border-ink-500 bg-ink-500/40", label: "rodou sem resultado" }
+          : { shape: "border-2 border-ink-500", label: "pendente" };
   return (
     <span role="img" aria-label={label} className={`h-2.5 w-2.5 shrink-0 rounded-full ${shape}`} />
   );

@@ -204,6 +204,10 @@ export async function* runPipeline(
   async function* failRun(error: AppError): AsyncGenerator<PipelineEvent, void> {
     await persistError(error);
     await repository.updateRun(runId, { status: "FAILED", finishedAt: new Date().toISOString() });
+    // Último progresso antes do erro: sem ele o painel congela com tudo pendente e o usuário não
+    // sabe em que etapa parou. Como `failStage` termina aqui, todo caminho de falha fica coberto.
+    progress.failed = true;
+    yield progressEvent();
     yield { type: "error", httpStatus: statusForError(error), error };
   }
 

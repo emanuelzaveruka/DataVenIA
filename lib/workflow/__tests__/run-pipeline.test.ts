@@ -281,8 +281,9 @@ describe("runPipeline", () => {
 
     const doneCounts = progress.map(
       (event) =>
-        (event as Extract<PipelineEvent, { type: "progress" }>).steps.filter((step) => step.done)
-          .length,
+        (event as Extract<PipelineEvent, { type: "progress" }>).steps.filter(
+          (step) => step.status === "DONE",
+        ).length,
     );
     // Monotônico: uma etapa concluída nunca "desconclui".
     expect([...doneCounts].sort((a, b) => a - b)).toEqual(doneCounts);

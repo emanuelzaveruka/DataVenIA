@@ -7,6 +7,8 @@ import type {
   ReportSource,
 } from "../lib/schemas/report.schema";
 import { ResearchDisclaimer } from "./research-disclaimer";
+import { HelpHint } from "./components/help-hint";
+import { GLOSSARY } from "../lib/config/glossary";
 
 const CLASSIFICATION_LABELS: Record<IssueClassification, string> = {
   TENDENCIA_FAVORAVEL: "Tendência favorável",
@@ -99,11 +101,14 @@ function IssueSection({ issue }: { issue: ReportIssue }) {
           {issue.topic}
         </h3>
         <p className="text-sm text-ink-600 dark:text-ink-400">{issue.question}</p>
-        <p
-          className={`flex w-fit items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${CLASSIFICATION_STYLES[issue.classification]}`}
-        >
-          <span aria-hidden="true">{CLASSIFICATION_SHAPES[issue.classification]}</span>
-          {CLASSIFICATION_LABELS[issue.classification]}
+        <p className="flex flex-wrap items-center gap-1.5">
+          <span
+            className={`flex w-fit items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${CLASSIFICATION_STYLES[issue.classification]}`}
+          >
+            <span aria-hidden="true">{CLASSIFICATION_SHAPES[issue.classification]}</span>
+            {CLASSIFICATION_LABELS[issue.classification]}
+          </span>
+          {issue.classification === "INDETERMINADA" && <HelpHint entry={GLOSSARY.indeterminada} />}
         </p>
         <p className="text-xs text-ink-600 dark:text-ink-400">{issue.classificationReason}</p>
       </header>
@@ -111,8 +116,9 @@ function IssueSection({ issue }: { issue: ReportIssue }) {
       <div className="mt-4 rounded-md border border-ink-300 bg-ink-100 p-3 text-sm dark:border-ink-700 dark:bg-ink-800">
         <p className="font-medium">Tendência jurisprudencial</p>
         <p className="mt-1">{issue.trend.summary}</p>
-        <p className="mt-1 text-ink-600 dark:text-ink-400">
-          Leitura: {CONVERGENCE_LABELS[issue.trend.convergence] ?? issue.trend.convergence}.
+        <p className="mt-1 flex flex-wrap items-center gap-1.5 text-ink-600 dark:text-ink-400">
+          <span>Leitura: {CONVERGENCE_LABELS[issue.trend.convergence] ?? issue.trend.convergence}.</span>
+          <HelpHint entry={GLOSSARY.convergencia} />
         </p>
       </div>
 
@@ -140,7 +146,10 @@ function IssueSection({ issue }: { issue: ReportIssue }) {
 
       {issue.distinguishing.length > 0 && (
         <section className="mt-4">
-          <h4 className="text-sm font-semibold">Distinguishing</h4>
+          <h4 className="flex items-center gap-1.5 text-sm font-semibold">
+            Distinguishing
+            <HelpHint entry={GLOSSARY.distinguishing} />
+          </h4>
           <ul className="mt-2 flex flex-col gap-2">
             {issue.distinguishing.map((item, index) => (
               <li key={`${item.scratchpadId}-${index}`} className="text-sm">
@@ -239,10 +248,12 @@ function SourceLine({ source }: { source: ReportSource }) {
 function ReportFooter({ report }: { report: FinalReport }) {
   return (
     <footer className="flex flex-col gap-3 border-t border-ink-300 pt-4 text-xs text-ink-600 dark:border-ink-700 dark:text-ink-400">
-      <p>
-        {report.sample.analyzedDecisions} decisão(ões) analisada(s) em profundidade ·{" "}
-        {report.sample.verifiedEvidence} citação(ões) conferida(s) na fonte original ·{" "}
-        {report.sample.omittedItems} item(ns) omitido(s) por falta de verificação.
+      <p className="flex flex-wrap items-center gap-1.5">
+        <span>{report.sample.analyzedDecisions} decisão(ões) analisada(s) em profundidade ·</span>
+        <span>{report.sample.verifiedEvidence} citação(ões) conferida(s) na fonte original</span>
+        <HelpHint entry={GLOSSARY.citacaoConferida} />
+        <span>· {report.sample.omittedItems} item(ns) omitido(s) por falta de verificação.</span>
+        <HelpHint entry={GLOSSARY.omissoes} />
       </p>
 
       {report.omissions.length > 0 && (
