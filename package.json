@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "import:competencias": "node scripts/import-competencias.mjs"
   },
   "dependencies": {
     "file-type": "^22.1.0",

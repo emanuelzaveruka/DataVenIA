@@ -99,23 +99,37 @@ export function UploadForm() {
         <button
           type="submit"
           disabled={!file || isSubmitting}
-          className="rounded-lg bg-brand-navy px-4 py-2 text-sm font-medium text-brand-cream focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-green disabled:opacity-40 dark:bg-ink-050 dark:text-brand-navy"
+          className="flex items-center justify-center gap-2 rounded-lg bg-brand-navy px-4 py-2 text-sm font-medium text-brand-cream focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-green disabled:opacity-40 dark:bg-ink-050 dark:text-brand-navy"
         >
-          {isSubmitting ? "Processando..." : "Enviar documento"}
+          {isSubmitting ? (
+            <>
+              <LoadingSpinner />
+              <span>Processando...</span>
+            </>
+          ) : (
+            "Enviar documento"
+          )}
         </button>
       </form>
 
       {displayProgress && (
-        <ul className="flex flex-col gap-1 text-sm">
-          {displayProgress.map((step) => (
-            <li key={`${step.stage}-${step.label}`} className="flex items-center gap-2">
-              <StatusDot status={step.done ? "COMPLETED" : undefined} />
-              <span>
-                {step.label}
-                {typeof step.count === "number" ? ` (${step.count})` : ""}
-              </span>
-            </li>
-          ))}
+        <ul className="flex flex-col gap-2 rounded-lg border border-ink-300 p-4 text-sm dark:border-ink-700">
+          {displayProgress.map((step, index) => {
+            const isCurrentStep = isSubmitting && !step.done && (index === 0 || displayProgress[index - 1]?.done);
+            return (
+              <li key={`${step.stage}-${step.label}`} className="flex items-center gap-2.5">
+                {isCurrentStep ? (
+                  <LoadingSpinner className="h-3.5 w-3.5 text-brand-navy dark:text-brand-cream" />
+                ) : (
+                  <StatusDot status={step.done ? "COMPLETED" : undefined} />
+                )}
+                <span className={isCurrentStep ? "font-medium text-ink-900 dark:text-ink-050" : "text-ink-600 dark:text-ink-400"}>
+                  {step.label}
+                  {typeof step.count === "number" ? ` (${step.count})` : ""}
+                </span>
+              </li>
+            );
+          })}
         </ul>
       )}
 
@@ -188,5 +202,31 @@ function StatusDot({ status }: { status: "COMPLETED" | "FAILED" | undefined }) {
         : { shape: "border-2 border-ink-500", label: "pendente" };
   return (
     <span role="img" aria-label={label} className={`h-2.5 w-2.5 shrink-0 rounded-full ${shape}`} />
+  );
+}
+
+function LoadingSpinner({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg
+      className={`animate-spin ${className}`}
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="4"
+      />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+      />
+    </svg>
   );
 }
