@@ -116,7 +116,7 @@ export function UploadForm() {
               "Enviar documento"
             )}
           </button>
-          {result?.stages && (
+          {result && (
             <button
               type="button"
               onClick={() => setIsN8nModalOpen(true)}
@@ -132,15 +132,13 @@ export function UploadForm() {
         <div className="flex flex-col gap-2 rounded-lg border border-ink-300 p-4 text-sm dark:border-ink-700">
           <div className="flex items-center justify-between mb-1">
             <span className="font-semibold text-ink-900 dark:text-ink-050">Progresso do Pipeline</span>
-            {result?.stages && (
-              <button
-                type="button"
-                onClick={() => setIsN8nModalOpen(true)}
-                className="text-xs text-orange-500 hover:text-orange-400 font-medium underline flex items-center gap-1"
-              >
-                <span>⚡ Inspecionar Nós & Payloads (N8n)</span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => setIsN8nModalOpen(true)}
+              className="text-xs bg-orange-500/10 hover:bg-orange-500/20 text-orange-500 border border-orange-500/30 px-2 py-1 rounded font-medium flex items-center gap-1 transition"
+            >
+              <span>⚡ Abrir N8n Inspector</span>
+            </button>
           </div>
           <ul className="flex flex-col gap-2">
             {displayProgress.map((step, index) => {
@@ -218,16 +216,16 @@ export function UploadForm() {
           </div>
 
           <ReportView report={result.report} />
-
-          <N8nExecutionView
-            isOpen={isN8nModalOpen}
-            onClose={() => setIsN8nModalOpen(false)}
-            events={result.stages || []}
-            traceId={result.traceId}
-            runId={result.runId}
-          />
         </>
       )}
+
+      <N8nExecutionView
+        isOpen={isN8nModalOpen}
+        onClose={() => setIsN8nModalOpen(false)}
+        events={result?.stages || []}
+        traceId={result?.traceId}
+        runId={result?.runId}
+      />
     </div>
   );
 }
