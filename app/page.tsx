@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { UploadForm } from "./upload-form";
+import { ResearchDisclaimer } from "./research-disclaimer";
 
 export default function Home() {
   return (
@@ -11,11 +13,15 @@ export default function Home() {
         </p>
       </header>
 
+      <ResearchDisclaimer />
       <PrivacyNotice />
       <UploadForm />
 
       <p className="text-center text-xs text-neutral-400">
-        Resultado de apoio à pesquisa. Confirme a fonte e realize revisão jurídica independente.
+        <Link href="/relatorio-demo" className="underline underline-offset-2">
+          Ver um relatório de exemplo
+        </Link>{" "}
+        gerado sobre a jurisprudência fictícia de demonstração.
       </p>
     </main>
   );
