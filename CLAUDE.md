@@ -48,6 +48,18 @@ jurisprudência roda em modo fixture.
   providers Anthropic/OpenAI via fetch puro, sem SDK, selecionados por `getLlmProvider()`). Ambos os
   serviços recebem o `LlmProvider` por injeção (testáveis sem rede) e usam
   `generateStructuredWithRetry` para o retry-com-contexto de saída estruturada inválida (§11.7).
+  **Decisão de equipe posterior (2026-09-12)**: dois modelos com fallback — OpenAI e DeepSeek.
+  `deepseek-provider.ts` reaproveita `openai-compatible-provider.ts` (mesmo protocolo Chat
+  Completions em outro host; duplicar significaria corrigir bug de parsing duas vezes), e
+  `resilient-llm-provider.ts` espelha a mecânica de `resilient-jurisprudence-provider.ts`:
+  indisponibilidade do primário degrada para o reserva na mesma chamada, com circuit breaker
+  (HU-14) e origem em `metadata.source`, nunca silenciosa. **Exceção deliberada**: falha
+  `STRUCTURED_OUTPUT` não troca de modelo — é falha do conteúdo, não da disponibilidade, e §11.7/
+  HU-20 já a tratam com retry-com-contexto no mesmo modelo; trocar jogaria esse contexto fora e
+  gastaria a cota do reserva com um problema que o primário corrige sozinho. `getLlmProvider()`
+  compõe o par automaticamente quando há duas chaves; nomear um provider sem a chave é erro, não
+  degradação silenciosa. `provider.model` (obrigatório desde a Fase 8) mantém a chave de
+  idempotência de HU-33 separada por modelo.
 - **Fase 4 — Busca, ranking, seleção** ✅ concluída. HU-13 (`lib/services/jurisprudence/search-funnel.ts` —
   bloqueia e pede filtros quando `totalCount > rawSearchResultsCap`), HU-15
   (`lib/services/jurisprudence/pre-rank.ts` — score ponderado por critério com peso redistribuído

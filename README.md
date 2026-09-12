@@ -96,10 +96,19 @@ Sem variáveis de ambiente:
 cp .env.example .env.local
 ```
 
-Preencha `ANTHROPIC_API_KEY` **ou** `OPENAI_API_KEY`. Com as duas presentes, `LLM_PROVIDER`
-(`anthropic` | `openai`) decide; sem ela, Anthropic tem prioridade. `ANTHROPIC_MODEL` /
-`OPENAI_MODEL` sobrescrevem o modelo padrão. Ponto único de seleção:
+Preencha ao menos uma chave: `OPENAI_API_KEY`, `DEEPSEEK_API_KEY` ou `ANTHROPIC_API_KEY`
+(`*_MODEL` sobrescreve o modelo padrão de cada um). Ponto único de seleção:
 `lib/llm/get-llm-provider.ts` — nenhum serviço importa SDK de modelo.
+
+**Com duas chaves configuradas, o provider vira resiliente automaticamente** (HU-14/§11.4): o
+primário responde e, se estiver fora do ar, a chamada degrada para o reserva na mesma requisição,
+com a origem real em `metadata.source` — nunca silenciosa. Falhas retryable alimentam o circuit
+breaker, que passa a pular o primário enquanto aberto. `LLM_PROVIDER` escolhe o primário e
+`LLM_FALLBACK_PROVIDER` o reserva; sem elas, a ordem é `openai`, `deepseek`, `anthropic`.
+
+Uma exceção deliberada: **saída estruturada inválida não troca de modelo**. Essa falha é do
+conteúdo gerado, não da disponibilidade do provider, e §11.7/HU-20 já a tratam com
+retry-com-contexto-do-erro no mesmo modelo — trocar jogaria fora esse contexto.
 
 > Trocar de modelo muda a chave de idempotência dos Scratchpads (HU-33), de propósito: um
 > resultado gerado por outro modelo não é reaproveitado como se fosse do atual.
@@ -143,7 +152,8 @@ Nada aqui foi executado — provisionar é decisão de quem opera as contas.
 
 1. Importar o repositório na Vercel (Next.js é detectado automaticamente; não há configuração
    especial de build).
-2. Configurar as variáveis de ambiente do projeto: `ANTHROPIC_API_KEY` ou `OPENAI_API_KEY`, e
+2. Configurar as variáveis de ambiente do projeto: ao menos uma chave de LLM (`OPENAI_API_KEY`,
+   `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY` — duas delas ligam o fallback entre modelos), e
    `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` se for usar Postgres. Todas como variáveis de
    servidor — nenhuma com prefixo `NEXT_PUBLIC_`.
 3. Aplicar a migration no banco de produção **antes** do primeiro deploy que use persistência.
