@@ -2,7 +2,7 @@ import type { LlmProvider } from "../provider";
 import { createOpenAiCompatibleProvider } from "./openai-compatible-provider";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
-const DEFAULT_MODEL = "gpt-5-nano";
+const DEFAULT_MODEL = "gpt-4o-mini";
 
 export interface OpenAiProviderConfig {
   apiKey: string;
@@ -15,11 +15,15 @@ export interface OpenAiProviderConfig {
  * modelo padrão.
  */
 export function createOpenAiProvider(config: OpenAiProviderConfig): LlmProvider {
+  const model = config.model ?? DEFAULT_MODEL;
+  const isReasoningModel = model.startsWith("o1") || model.startsWith("o3") || model.startsWith("gpt-5");
+
   return createOpenAiCompatibleProvider({
     name: "openai",
     apiUrl: OPENAI_API_URL,
     apiKey: config.apiKey,
-    model: config.model ?? DEFAULT_MODEL,
-    maxTokensParameter: "max_completion_tokens",
+    model,
+    maxTokensParameter: isReasoningModel ? "max_completion_tokens" : "max_tokens",
+    reasoningEffort: isReasoningModel ? "minimal" : undefined,
   });
 }

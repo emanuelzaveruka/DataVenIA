@@ -10,7 +10,10 @@ nenhum projeto real** — o provisionamento é decisão de quem opera a conta.
    - SQL Editor do dashboard (colar e executar);
    - `supabase db push`, se o diretório estiver linkado ao projeto;
    - `psql "$DATABASE_URL" -f supabase/migrations/0001_initial_schema.sql`.
-3. Copie as variáveis para `.env` (ver `.env.example`):
+3. Aplique `migrations/0002_reference_data.sql` (dados de referência do TJPR) e, em seguida, a
+   carga `seed/camara_competencias.sql`. O seed é idempotente: reaplicar substitui o conteúdo
+   inteiro, em vez de acumular duas versões da norma.
+4. Copie as variáveis para `.env` (ver `.env.example`):
 
    ```
    SUPABASE_URL=https://<project-ref>.supabase.co
@@ -32,6 +35,10 @@ explícito, para nunca degradar para memória em silêncio.
 - **`jurisprudence_decisions` não referencia execução.** É jurisprudência pública: é o único dado
   que HU-06 autoriza reter entre sessões, e é o cache que HU-33 reaproveita. Todo o resto pende de
   `analysis_runs` com `ON DELETE CASCADE`, para que descartar uma sessão seja um `DELETE` só.
+- **Dados de referência ficam fora da árvore de execução.** `camara_competencias` (e as tabelas
+  de referência que vierem depois) não têm `run_id`: são norma pública do TJPR, iguais para toda
+  execução. `deleteRun` não as toca. A carga é gerada de `docs/` por
+  `scripts/import-competencias.mjs` — não edite `seed/` à mão, rode o script.
 - **Nenhuma coluna guarda o texto bruto do documento do usuário.** `uploaded_documents` só tem
   `sanitized_text` (HU-05/HU-34) — a garantia é do schema, não da disciplina de quem escreve o
   insert.

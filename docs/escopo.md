@@ -31,5 +31,17 @@ verifique contra esta lista — expansão de escopo exige decisão explícita, n
   massa, fine-tuning, vector DB complexo, monitoramento contínuo de todos os processos, análise
   autônoma sem evidência.
 
+## Adições por decisão explícita do usuário
+
+Itens fora das 38 HUs originais, aceitos por decisão registrada (o que esta seção existe para
+tornar rastreável — §10 exige decisão explícita, nunca por omissão).
+
+- **2026-09-12 — dados de referência do TJPR em tabela própria.** Competência material das Câmaras
+  (`camara_competencias`, já carregada) e contatos de desembargadores (a definir quando a planilha
+  chegar). São dados públicos do tribunal, fora da árvore de execução e fora da cascata de HU-06.
+  Não alteram o pipeline Map→Reduce→Verify nem o que vai ao relatório; servem a roteamento de
+  matéria e consulta. Continua valendo o "fora do escopo" acima — em especial, nada aqui autoriza
+  outro tribunal, coleta automatizada do portal, ou uso dos contatos para qualquer forma de envio.
+
 Ver também HU-38 (plano de validação da fonte TJPR) para os limites do que pode ser feito com o
 portal público antes de qualquer decisão de integração real.

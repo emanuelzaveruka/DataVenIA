@@ -1,7 +1,9 @@
 # Modelo de dados
 
 Referência das 11 tabelas de `contexto-geral.md` §11.8, materializadas em
-[`supabase/migrations/0001_initial_schema.sql`](../supabase/migrations/0001_initial_schema.sql).
+[`supabase/migrations/0001_initial_schema.sql`](../supabase/migrations/0001_initial_schema.sql),
+mais as tabelas de **dados de referência** do TJPR em
+[`supabase/migrations/0002_reference_data.sql`](../supabase/migrations/0002_reference_data.sql).
 Este documento descreve **o que o modelo é e por quê**; as instruções de aplicação
 (criar projeto, rodar a migration, variáveis) estão em
 [`supabase/README.md`](../supabase/README.md).
@@ -24,6 +26,7 @@ analysis_runs  (uma execução do pipeline; tudo pende daqui)
 └── errors                  1:N   AppError persistido (§11.3)
 
 jurisprudence_decisions  (FORA da árvore — cache público, sobrevive ao descarte)
+camara_competencias      (FORA da árvore — dado de referência: norma do TJPR)
 ```
 
 ## Decisões estruturais
@@ -148,6 +151,40 @@ de uma execução, nessa ordem".
 
 `description` (técnica) e `user_message` (de usuário) ficam em colunas separadas porque §11.3 as
 mantém separadas: auditoria nunca deve acabar lendo a frase que foi mostrada na tela.
+
+## Dados de referência (fora da árvore de execução)
+
+Tabelas que **não pertencem a nenhuma execução**: não referenciam `analysis_runs`, não entram na
+cascata de HU-06 e não contêm dado do cliente. Mesma natureza de `jurisprudence_decisions` — é
+informação pública do tribunal, igual para todo usuário. Descartar uma sessão não pode apagá-las.
+
+### `camara_competencias`
+
+`id` (PK), `area` (`CIVEL`/`CRIMINAL`), `grupo`, `camaras` (`text[]`), `secao`, `item`,
+`competencia`, `descricao`, `ordem`, `fonte`, `busca` (tsvector gerado). Único:
+`(grupo, ordem)`.
+
+A competência material das Câmaras do TJPR, conforme a emenda regimental vigente. Três decisões
+que valem conhecer:
+
+- **`grupo` e `camaras` coexistem.** `grupo` é o rótulo literal do documento oficial
+  ("8ª, 9ª e 10ª Cíveis"), que é como a norma publica a competência e como se confere a linha
+  contra a fonte. `camaras` é o mesmo grupo expandido no formato em que `chamber` chega das
+  decisões (§3.4: "9ª Câmara Cível") — sem ele, "de que a 9ª Cível cuida?" seria parsing de string
+  em cada consulta. Índice GIN no array.
+- **`item` não é único dentro do grupo, e a letra "f" não existe nas 4ª/5ª Cíveis.** O documento
+  oficial repete "e)" e pula "f)". A repetição literal é removida na importação (apareceria como
+  competência listada duas vezes); a lacuna da letra é preservada, porque renumerar quebraria a
+  referência ao documento. A chave real é `(grupo, ordem)`.
+- **`competencia` é normativo, `descricao` não.** O texto que vale juridicamente é o da coluna
+  oficial; a descrição é um resumo em linguagem acessível, e não substitui o texto oficial em
+  nenhuma exibição (§7.2/HU-28).
+
+A carga não está na migration: fica em `supabase/seed/camara_competencias.sql`, gerado com o
+dataset TS equivalente por `scripts/import-competencias.mjs`. Separar DDL de seed é o que permite
+reaplicar o dado numa nova emenda regimental sem editar migration já aplicada, e a cópia em
+`lib/reference/camara-competencias.data.ts` é o que mantém a consulta funcionando sem banco
+(critério de aceite 16) — as duas saem do mesmo script justamente para não divergirem.
 
 ## Reconstrução de uma execução
 

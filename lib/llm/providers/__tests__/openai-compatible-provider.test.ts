@@ -40,6 +40,7 @@ describe("OpenAI-compatible providers", () => {
     const body = JSON.parse(fetch.mock.calls[0]![1]!.body as string);
     expect(body.max_completion_tokens).toBe(123);
     expect(body.max_tokens).toBeUndefined();
+    expect(body.reasoning_effort).toBe("minimal");
   });
 
   it("keeps max_tokens for DeepSeek's OpenAI-compatible endpoint", async () => {
@@ -52,5 +53,39 @@ describe("OpenAI-compatible providers", () => {
     const body = JSON.parse(fetch.mock.calls[0]![1]!.body as string);
     expect(body.max_tokens).toBe(123);
     expect(body.max_completion_tokens).toBeUndefined();
+    expect(body.reasoning_effort).toBeUndefined();
+  });
+
+  it("returns diagnostic metadata when a chat completion has no message content", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [{ finish_reason: "length", message: { content: null } }],
+            usage: {
+              completion_tokens: 123,
+              completion_tokens_details: { reasoning_tokens: 123 },
+            },
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    const result = await generateWith(createOpenAiProvider({ apiKey: "key", model: "gpt-5-nano" }));
+
+    expect(result.isError).toBe(true);
+    if (!result.isError) return;
+    expect(result.error.code).toBe("STRUCTURED_OUTPUT_MISSING");
+    expect(result.error.description).toContain("finish_reason=length");
+    expect(result.error.description).toContain("reasoning_tokens=123");
+    expect(result.error.metadata).toMatchObject({
+      finishReason: "length",
+      usage: {
+        completion_tokens: 123,
+        completion_tokens_details: { reasoning_tokens: 123 },
+      },
+    });
   });
 });

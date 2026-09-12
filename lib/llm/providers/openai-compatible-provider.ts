@@ -22,14 +22,31 @@ export interface OpenAiCompatibleProviderConfig {
   apiKey: string;
   model: string;
   maxTokensParameter?: "max_tokens" | "max_completion_tokens";
+  reasoningEffort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 }
 
 interface ChatCompletionResponse {
-  choices: { message: { content: string | null } }[];
+  choices: {
+    finish_reason?: string | null;
+    message?: {
+      content?: string | null;
+      refusal?: string | null;
+    };
+  }[];
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+    completion_tokens_details?: {
+      reasoning_tokens?: number;
+      accepted_prediction_tokens?: number;
+      rejected_prediction_tokens?: number;
+    };
+  };
 }
 
 export function createOpenAiCompatibleProvider(config: OpenAiCompatibleProviderConfig): LlmProvider {
-  const { name, apiUrl, apiKey, model, maxTokensParameter = "max_tokens" } = config;
+  const { name, apiUrl, apiKey, model, maxTokensParameter = "max_tokens", reasoningEffort } = config;
   const errorPrefix = name.toUpperCase();
 
   return {
@@ -53,6 +70,7 @@ ${JSON.stringify(jsonSchema)}`;
           body: JSON.stringify({
             model,
             [maxTokensParameter]: params.maxOutputTokens ?? 4096,
+            ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
             response_format: { type: "json_object" },
             messages: [
               { role: "system", content: systemWithSchema },
@@ -92,18 +110,29 @@ ${JSON.stringify(jsonSchema)}`;
       }
 
       const body = (await response.json()) as ChatCompletionResponse;
-      const content = body.choices?.[0]?.message?.content;
+      const choice = body.choices?.[0];
+      const content = choice?.message?.content;
 
       if (!content) {
+        const finishReason = choice?.finish_reason ?? "unknown";
+        const refusal = choice?.message?.refusal;
+        const reasoningTokens = body.usage?.completion_tokens_details?.reasoning_tokens;
         return toolFailure(
           createAppError({
             code: "STRUCTURED_OUTPUT_MISSING",
             category: "STRUCTURED_OUTPUT",
             severity: "ERROR",
-            description: `${name} response did not include message content`,
+            description: `${name} response did not include message content (finish_reason=${finishReason}${
+              typeof reasoningTokens === "number" ? `, reasoning_tokens=${reasoningTokens}` : ""
+            }${refusal ? ", refusal=true" : ""})`,
             isRetryable: true,
             source: name,
             operation: "generateStructured",
+            metadata: {
+              finishReason,
+              refusal: refusal ? refusal.slice(0, 500) : undefined,
+              usage: body.usage,
+            },
           }),
         );
       }
