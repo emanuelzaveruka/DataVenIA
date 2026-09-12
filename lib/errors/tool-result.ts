@@ -1,0 +1,32 @@
+import type { AppError } from "./app-error";
+
+export interface ToolResultMetadata {
+  durationMs?: number;
+  attempts?: number;
+  source?: string;
+  traceId?: string;
+}
+
+export interface ToolSuccess<T> {
+  isError: false;
+  data: T;
+  metadata?: ToolResultMetadata;
+}
+
+export interface ToolFailure {
+  isError: true;
+  error: AppError;
+}
+
+export type ToolResult<T> = ToolSuccess<T> | ToolFailure;
+
+export function toolSuccess<T>(
+  data: T,
+  metadata?: ToolResultMetadata,
+): ToolSuccess<T> {
+  return { isError: false, data, metadata };
+}
+
+export function toolFailure(error: AppError): ToolFailure {
+  return { isError: true, error };
+}

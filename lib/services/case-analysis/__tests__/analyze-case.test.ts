@@ -1,0 +1,91 @@
+import { describe, expect, it, vi } from "vitest";
+import { analyzeCase } from "../analyze-case";
+import { parseStructuredOutput } from "../../../llm/validate-structured-output";
+import type { GenerateStructuredParams, LlmProvider } from "../../../llm/provider";
+import type { SanitizedDocument } from "../../../schemas/sanitization.schema";
+import { MIN_CASE_ANALYSIS_INPUT_CHARS } from "../../../config/limits";
+
+function fakeProviderFromRawResponses(rawResponses: unknown[]): LlmProvider {
+  let index = 0;
+  const generateStructured = vi.fn(async (params: GenerateStructuredParams<unknown>) => {
+    const raw = rawResponses[index];
+    index += 1;
+    return parseStructuredOutput(params.schema, params.schemaName, raw, "fake");
+  }) as unknown as LlmProvider["generateStructured"];
+
+  return { name: "fake", generateStructured };
+}
+
+function sanitizedDocument(text: string): SanitizedDocument {
+  return { documentId: "doc-1", sanitizedText: text, redactions: [] };
+}
+
+const validCaseAnalysis = {
+  parties: { plaintiff: "Fulano", defendant: "Ciclano" },
+  facts: ["Negativação indevida em 2024."],
+  requests: ["Indenização por danos morais."],
+  legalIssues: [
+    { id: "issue-1", topic: "Dano moral", question: "Há dano moral por negativação indevida?", relevance: "HIGH" },
+  ],
+  clientArguments: ["A negativação foi indevida."],
+  opposingArguments: [],
+  citedLaws: [],
+  citedPrecedents: [],
+  evidenceSummary: [],
+};
+
+describe("analyzeCase", () => {
+  it("rejects documents below the minimum useful-content threshold without calling the provider", async () => {
+    const provider = fakeProviderFromRawResponses([]);
+    const document = sanitizedDocument("texto curto");
+
+    const result = await analyzeCase(document, provider);
+
+    expect(result.isError).toBe(true);
+    if (result.isError) {
+      expect(result.error.code).toBe("INSUFFICIENT_DOCUMENT_CONTENT");
+      expect(result.error.isRetryable).toBe(false);
+    }
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+  });
+
+  it("extracts facts and requests without fabricating optional fields (HU-07)", async () => {
+    const provider = fakeProviderFromRawResponses([validCaseAnalysis]);
+    const document = sanitizedDocument("x".repeat(MIN_CASE_ANALYSIS_INPUT_CHARS + 1));
+
+    const result = await analyzeCase(document, provider);
+
+    expect(result.isError).toBe(false);
+    if (!result.isError) {
+      expect(result.data.facts).toEqual(validCaseAnalysis.facts);
+      expect(result.data.requests).toEqual(validCaseAnalysis.requests);
+      expect(result.data.processNumber).toBeUndefined();
+    }
+  });
+
+  it("rejects a CaseAnalysis with zero legalIssues as a business rule, not a generic issue (HU-08/HU-09)", async () => {
+    const provider = fakeProviderFromRawResponses([{ ...validCaseAnalysis, legalIssues: [] }]);
+    const document = sanitizedDocument("x".repeat(MIN_CASE_ANALYSIS_INPUT_CHARS + 1));
+
+    const result = await analyzeCase(document, provider);
+
+    expect(result.isError).toBe(true);
+    if (result.isError) {
+      expect(result.error.code).toBe("NO_LEGAL_ISSUES_IDENTIFIED");
+      expect(result.error.category).toBe("BUSINESS_RULE");
+    }
+  });
+
+  it("retries once with error feedback when the model's first output fails schema validation", async () => {
+    const provider = fakeProviderFromRawResponses([
+      { ...validCaseAnalysis, legalIssues: [{ id: "issue-1", topic: "x" }] },
+      validCaseAnalysis,
+    ]);
+    const document = sanitizedDocument("x".repeat(MIN_CASE_ANALYSIS_INPUT_CHARS + 1));
+
+    const result = await analyzeCase(document, provider);
+
+    expect(result.isError).toBe(false);
+    expect(provider.generateStructured).toHaveBeenCalledTimes(2);
+  });
+});
