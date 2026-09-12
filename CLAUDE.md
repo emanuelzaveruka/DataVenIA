@@ -190,10 +190,36 @@ jurisprudência roda em modo fixture.
   provisionado (a conta é do usuário: criar o projeto, aplicar a migration e definir as variáveis é
   ação dele) e o pipeline das Fases 3–7 **segue não wireado** na rota, que persiste apenas a
   ingestão — ligar ponta a ponta exige credencial de modelo real e é Fase 10.
-- **Fase 9 — Integração real TJPR**: condicional ao resultado da inspeção manual da Fase 0/HU-38. Se o
-  portal não permitir (login/CAPTCHA/rate limit/termos), o produto permanece em fixture
-  permanentemente.
-- **Fase 10 — Deploy e entrega**: Vercel + Supabase de produção, README, modelo de dados, licença MIT.
+- **Fase 9 — Integração real TJPR** ⛔ **bloqueada por ação do usuário, não por falta de
+  implementação**. HU-38 exige inspeção manual do portal via navegador (DevTools → Network) antes de
+  qualquer linha de `lib/providers/tjpr.ts`, e §9/`docs/escopo.md` proíbem substituir essa etapa por
+  scraping ou automação de navegador — nenhum agente pode executá-la. `docs/tjpr-portal-validacao.md`
+  foi fechado como documento acionável: os seis itens que §9 exige observar, o roteiro passo a passo
+  no navegador, uma seção **Achados** vazia para preencher, e o **critério de decisão** explícito —
+  as cinco condições que, juntas, autorizam implementar o adaptador real, e as quatro que, sozinhas,
+  obrigam a permanecer em fixture permanentemente (sessão/login/CAPTCHA, termos que vedam reuso
+  automatizado, rate limit só contornável mascarando origem, ausência de URL estável por decisão).
+  Nesse segundo caso a Fase 9 **encerra** em vez de ficar pendente: é o caminho previsto por §14, não
+  um débito. Operar em fixture hoje não é estado degradado — satisfaz o critério de aceite 16 por
+  construção. A composição documentada em `get-jurisprudence-provider.ts` foi corrigida para o que
+  vale depois das Fases 6–8: o cache (§11.8) é a camada **mais externa**, por fora do
+  resiliente+circuit breaker (decisão em cache não deve nem consultar disponibilidade da fonte), e
+  quem chamar `verifyEvidence` tem de passar `provider.fresh` — pelo cache, HU-24 compararia o hash
+  com ele mesmo e "a fonte mudou" nunca dispararia. **`lib/providers/tjpr.ts` continua inexistente,
+  de propósito.**
+- **Fase 10 — Deploy e entrega** ✅ concluída no que não exige credencial; o deploy em si é ação do
+  usuário. `README.md` reescrito para o produto real (pipeline Map→Reduce→Verify em diagrama, as três
+  regras que explicam a maior parte do código, os três modos de execução — sem credencial nenhuma,
+  com LLM, com Postgres —, comandos, passos de deploy na Vercel e a postura do produto de §7.2/HU-28/
+  HU-36). `docs/modelo-de-dados.md` documenta as 11 tabelas de §11.8 já materializadas na migration:
+  as cinco decisões estruturais (cascata de HU-06, `jurisprudence_decisions` fora dela, ausência de
+  coluna para texto bruto, JSONB + revalidação Zod na leitura, RLS sem policy), tabela a tabela, e
+  uma matriz que liga cada uma das seis perguntas de §14 à coluna que a responde — é o teste prático
+  de HU-34 ("reconstruir todas as etapas a partir do banco"). `LICENSE` MIT na raiz + `license` no
+  `package.json`. **Não foi executado nem provisionado nada**: criar projeto Supabase, aplicar a
+  migration, importar na Vercel e configurar as variáveis (todas de servidor — `NEXT_PUBLIC_` em
+  nenhuma, a service role key ignora RLS) são passos manuais documentados no README. Sem as
+  variáveis do Supabase o deploy sobe e funciona em memória + fixture, o que basta para demonstração.
 
 A partir da Fase 3 as fases formam uma cadeia sequencial real — cada uma consome o schema/tipo de
 saída da anterior (ex.: Fase 5 depende da seleção da Fase 4; Fase 6 depende dos Scratchpads da Fase
