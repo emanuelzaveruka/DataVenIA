@@ -85,6 +85,7 @@ function analysisResponse(overrides: Partial<CrossFileAnalysis> = {}): { analyse
     analyses: [
       {
         legalIssueId: "LI-1",
+        sampleCoverage: "COVERED",
         conclusion: "A Câmara reconhece a abusividade, mas divide-se quanto ao dano moral.",
         supportingDecisions: ["SP-1"],
         opposingDecisions: ["SP-2"],

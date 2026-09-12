@@ -15,6 +15,7 @@ const context: CrossFileReferenceContext = {
 function analysis(overrides: Partial<CrossFileAnalysis> = {}): CrossFileAnalysis {
   return {
     legalIssueId: "LI-1",
+    sampleCoverage: "COVERED",
     conclusion: "A Câmara vem reconhecendo a abusividade da negativa.",
     supportingDecisions: ["SP-1"],
     opposingDecisions: ["SP-2"],
@@ -26,6 +27,27 @@ function analysis(overrides: Partial<CrossFileAnalysis> = {}): CrossFileAnalysis
     suggestedArguments: [{ argument: "Invocar a Súmula 608 do STJ.", evidenceIds: ["EV-1"] }],
     ...overrides,
   };
+}
+
+/**
+ * A questão jurídica que a amostra simplesmente não trata — o estado que o schema tornava
+ * irrepresentável e que empurrava o modelo a inventar um vínculo para conseguir responder.
+ */
+function uncovered(overrides: Partial<CrossFileAnalysis> = {}): CrossFileAnalysis {
+  return analysis({
+    legalIssueId: "LI-2",
+    sampleCoverage: "NOT_COVERED",
+    conclusion: "Nenhuma das decisões analisadas trata da competência do juizado.",
+    supportingDecisions: [],
+    opposingDecisions: [],
+    mixedDecisions: [],
+    strongestSupporting: [],
+    strongestOpposing: [],
+    recurringFactors: [],
+    risks: [],
+    suggestedArguments: [],
+    ...overrides,
+  });
 }
 
 function parse(analyses: CrossFileAnalysis[]) {
@@ -95,19 +117,67 @@ describe("buildCrossFileAnalysisResponseSchema", () => {
   });
 
   it("rejects a conclusion backed by no decision at all (HU-21)", () => {
+    const result = parse([analysis(), uncovered({ sampleCoverage: "COVERED" })]);
+    expect(result.success).toBe(false);
+    expect(messages(result)).toContain("pelo menos uma decisão real");
+  });
+
+  it("points the retry at NOT_COVERED instead of only forbidding the empty analysis", () => {
+    const result = parse([analysis(), uncovered({ sampleCoverage: "COVERED" })]);
+    expect(messages(result)).toContain("NOT_COVERED");
+  });
+
+  it('accepts a legal issue the sample does not address at all, declared as "NOT_COVERED"', () => {
+    const result = parse([analysis(), uncovered()]);
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects "NOT_COVERED" that still lists a decision — a contradiction, not a lacuna', () => {
+    const result = parse([analysis(), uncovered({ supportingDecisions: ["SP-1"] })]);
+    expect(result.success).toBe(false);
+    expect(messages(result)).toContain("SP-1");
+  });
+
+  it('rejects "NOT_COVERED" that still asserts risks, arguments, factors or a chamber pattern', () => {
     const result = parse([
       analysis(),
-      analysis({
-        legalIssueId: "LI-2",
-        supportingDecisions: [],
-        opposingDecisions: [],
-        mixedDecisions: [],
-        strongestSupporting: [],
-        strongestOpposing: [],
+      uncovered({
+        risks: [{ description: "Risco sem amostra que o sustente.", evidenceIds: ["EV-1"] }],
+        recurringFactors: ["Fator sem decisão de origem"],
+        chamberPattern: "Padrão sem decisão analisada.",
       }),
     ]);
     expect(result.success).toBe(false);
-    expect(messages(result)).toContain("pelo menos uma decisão real");
+    expect(messages(result)).toContain("risks");
+    expect(messages(result)).toContain("recurringFactors");
+    expect(messages(result)).toContain("chamberPattern");
+  });
+
+  it("does not demand contrary precedents from a reduce where nothing was covered (HU-22)", () => {
+    const result = parse([
+      uncovered({ legalIssueId: "LI-1" }),
+      uncovered({ legalIssueId: "LI-2" }),
+    ]);
+    expect(result.success).toBe(true);
+  });
+
+  it("still demands contrary precedents as soon as one issue is covered (HU-22)", () => {
+    const result = parse([
+      analysis({ opposingDecisions: [], strongestOpposing: [] }),
+      uncovered({ legalIssueId: "LI-2" }),
+    ]);
+    expect(result.success).toBe(false);
+    expect(messages(result)).toContain("contrários");
+  });
+
+  it("treats a missing sampleCoverage as COVERED, so the old contract keeps its guarantees", () => {
+    const { sampleCoverage, ...withoutField } = analysis();
+    void sampleCoverage;
+    const result = buildCrossFileAnalysisResponseSchema(context).safeParse({
+      analyses: [withoutField, analysis({ legalIssueId: "LI-2" })],
+    });
+    expect(result.success).toBe(true);
+    expect(result.data?.analyses[0]?.sampleCoverage).toBe("COVERED");
   });
 
   it("rejects strongestSupporting that was never listed as supporting or mixed", () => {

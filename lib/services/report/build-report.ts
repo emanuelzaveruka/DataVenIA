@@ -39,6 +39,19 @@ export const UNVERIFIED_OPPOSING_PRECEDENTS_NOTICE =
 export const NO_ANALYSIS_OPPOSING_NOTICE =
   "Esta questão não foi analisada contra a jurisprudência, então nada se sabe sobre precedentes contrários.";
 
+/**
+ * Quarto caso, e o mais fácil de confundir com os outros: a análise cruzada **rodou** e concluiu
+ * que nenhuma das decisões recuperadas trata desta questão (`sampleCoverage: "NOT_COVERED"`).
+ * Exibir aqui "nenhum precedente contrário identificado na amostra" seria afirmar algo sobre uma
+ * amostra que nunca falou desta questão — e o leitor entenderia o silêncio como ausência de
+ * contraditório, isto é, como um sinal favorável que o pipeline não tem.
+ */
+export const ISSUE_NOT_COVERED_NOTICE =
+  "Nenhuma das decisões analisadas trata desta questão, então a amostra nada diz sobre precedentes contrários a ela.";
+
+export const ISSUE_NOT_COVERED_REASON =
+  "A análise cruzada rodou, mas nenhuma das decisões recuperadas trata desta questão jurídica — a busca não encontrou jurisprudência sobre este ponto.";
+
 export interface BuildReportInput {
   caseAnalysis: CaseAnalysis;
   /** Saída de `enforceEvidencePolicy` (HU-25) — nunca os Scratchpads nem o cross-file cru. */
@@ -318,12 +331,19 @@ function buildIssue(
   const sampleHasOpposition =
     analysis.opposingDecisions.length > 0 || analysis.mixedDecisions.length > 0;
 
+  // `NOT_COVERED` já garante listas vazias no schema, então trend/pontos/riscos saem naturalmente
+  // zerados: o que muda aqui é só o *motivo* exibido. Sem esta distinção o relatório diria
+  // "nenhum precedente com trecho verificado", culpando a verificação por uma lacuna da busca.
+  const notCovered = analysis.sampleCoverage === "NOT_COVERED";
+
   return {
     legalIssueId: issue.id,
     topic: issue.topic,
     question: issue.question,
     relevance: issue.relevance,
-    ...classifyIssue(trend, favorablePoints, contraryPoints),
+    ...(notCovered
+      ? { classification: "INDETERMINADA" as const, classificationReason: ISSUE_NOT_COVERED_REASON }
+      : classifyIssue(trend, favorablePoints, contraryPoints)),
     conclusion: conclusionCheck.blocked ? undefined : analysis.conclusion,
     conclusionBlockedReason: conclusionCheck.blocked
       ? "Conclusão suprimida por conter métrica de probabilidade de êxito, vedada pela política do produto."
@@ -333,8 +353,9 @@ function buildIssue(
     recurringFactors: analysis.recurringFactors,
     favorablePoints,
     contraryPoints,
-    contraryPointsNotice:
-      contraryPoints.length > 0
+    contraryPointsNotice: notCovered
+      ? ISSUE_NOT_COVERED_NOTICE
+      : contraryPoints.length > 0
         ? undefined
         : sampleHasOpposition
           ? UNVERIFIED_OPPOSING_PRECEDENTS_NOTICE

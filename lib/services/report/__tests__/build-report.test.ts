@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildReport,
+  ISSUE_NOT_COVERED_NOTICE,
+  ISSUE_NOT_COVERED_REASON,
   NO_ANALYSIS_OPPOSING_NOTICE,
   UNVERIFIED_OPPOSING_PRECEDENTS_NOTICE,
 } from "../build-report";
@@ -279,6 +281,50 @@ describe("buildReport — contrários e classificação (HU-22/HU-29)", () => {
     // identificado" afirmaria um fato sobre decisões que nunca foram reduzidas (HU-22).
     expect(report.issues[1]!.contraryPointsNotice).toBe(NO_ANALYSIS_OPPOSING_NOTICE);
     expect(report.issues[1]!.contraryPointsNotice).not.toBe(NO_OPPOSING_PRECEDENTS_NOTICE);
+  });
+
+  it('reports an issue the sample does not address as INDETERMINADA, blaming the search and not the verification', () => {
+    const twoIssues = caseAnalysis({
+      legalIssues: [
+        { id: "LI-1", topic: "Abusividade", question: "É abusiva?", relevance: "HIGH" },
+        { id: "LI-2", topic: "Competência", question: "Cabe ao juizado?", relevance: "LOW" },
+      ],
+    });
+
+    const report = expectReport(
+      build({
+        caseAnalysis: twoIssues,
+        analyses: [
+          analysis(),
+          analysis({
+            legalIssueId: "LI-2",
+            sampleCoverage: "NOT_COVERED",
+            conclusion: "As decisões analisadas tratam de cobertura, não de competência.",
+            supportingDecisions: [],
+            opposingDecisions: [],
+            mixedDecisions: [],
+            chamberPattern: undefined,
+            recurringFactors: [],
+            strongestSupporting: [],
+            strongestOpposing: [],
+            risks: [],
+            suggestedArguments: [],
+          }),
+        ],
+      }),
+    );
+
+    const uncovered = report.issues[1]!;
+    expect(uncovered.classification).toBe("INDETERMINADA");
+    expect(uncovered.classificationReason).toBe(ISSUE_NOT_COVERED_REASON);
+    expect(uncovered.trend.analyzedCount).toBe(0);
+    // A conclusão do modelo sobrevive: é ela que diz ao leitor do que a amostra tratava.
+    expect(uncovered.conclusion).toContain("não de competência");
+    // Os três avisos de ausência de contrários são distintos de propósito — o desta questão não
+    // pode ser lido como "a amostra foi checada e não havia contrário".
+    expect(uncovered.contraryPointsNotice).toBe(ISSUE_NOT_COVERED_NOTICE);
+    expect(uncovered.contraryPointsNotice).not.toBe(NO_OPPOSING_PRECEDENTS_NOTICE);
+    expect(uncovered.contraryPointsNotice).not.toBe(NO_ANALYSIS_OPPOSING_NOTICE);
   });
 });
 

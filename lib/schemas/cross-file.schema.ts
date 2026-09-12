@@ -25,8 +25,22 @@ export const SuggestedArgumentSchema = z.object({
 });
 export type SuggestedArgument = z.infer<typeof SuggestedArgumentSchema>;
 
+/**
+ * HU-21/HU-29 — "a amostra não trata desta questão" é um resultado legítimo, não um erro. Sem este
+ * campo o schema tornava o estado *irrepresentável*: `validateIssueCoverage` exige uma análise para
+ * cada questão jurídica e `validateCoverage` exige pelo menos uma decisão real por análise, de modo
+ * que uma questão sem cobertura na jurisprudência recuperada só podia terminar em falha de
+ * structured output — e o retry com contexto do erro (§11.7) empurrava o modelo a inventar o
+ * vínculo entre uma decisão qualquer e a questão, exatamente a alucinação que HU-21 existe para
+ * impedir. `default("COVERED")` mantém a regra antiga para quem omite o campo (inclusive registros
+ * gravados antes desta versão): declarar a não-cobertura é um ato explícito, nunca o silêncio.
+ */
+export const SAMPLE_COVERAGE = ["COVERED", "NOT_COVERED"] as const;
+export type SampleCoverage = (typeof SAMPLE_COVERAGE)[number];
+
 export const CrossFileAnalysisSchema = z.object({
   legalIssueId: z.string().min(1),
+  sampleCoverage: z.enum(SAMPLE_COVERAGE).default("COVERED"),
   conclusion: z.string().min(1),
   supportingDecisions: z.array(z.string().min(1)),
   opposingDecisions: z.array(z.string().min(1)),
@@ -62,6 +76,61 @@ function addIssue(ctx: z.RefinementCtx, path: (string | number)[], message: stri
   ctx.addIssue({ code: "custom", path, message });
 }
 
+/**
+ * HU-21 tem dois lados, e o schema precisa dos dois. Uma análise `COVERED` sem nenhuma decisão real
+ * é conclusão sem lastro e continua sendo rejeitada; uma análise `NOT_COVERED` é a declaração
+ * explícita de que **a amostra** não trata da questão — e por isso não pode listar decisão,
+ * precedente forte, fator recorrente, padrão de Câmara, risco ou argumento: todos eles só existem
+ * apoiados nas decisões analisadas. A mensagem do caso `COVERED` aponta a saída válida de propósito:
+ * sem ela o retry com contexto do erro (§11.7) só oferecia ao modelo o caminho de inventar o
+ * vínculo com uma decisão qualquer.
+ */
+function validateCoverage(ctx: z.RefinementCtx, index: number, analysis: CrossFileAnalysis): void {
+  const cited = new Set([
+    ...analysis.supportingDecisions,
+    ...analysis.opposingDecisions,
+    ...analysis.mixedDecisions,
+    ...analysis.strongestSupporting,
+    ...analysis.strongestOpposing,
+  ]);
+
+  if (analysis.sampleCoverage === "NOT_COVERED") {
+    if (cited.size > 0) {
+      addIssue(
+        ctx,
+        ["analyses", index, "sampleCoverage"],
+        `"NOT_COVERED" declara que nenhuma decisão analisada trata desta questão, mas a análise lista ${[...cited].join(", ")}. Se alguma decisão trata da questão, use "COVERED".`,
+      );
+    }
+
+    const unfounded = (
+      [
+        ["risks", analysis.risks.length],
+        ["suggestedArguments", analysis.suggestedArguments.length],
+        ["recurringFactors", analysis.recurringFactors.length],
+        ["chamberPattern", analysis.chamberPattern ? 1 : 0],
+      ] as const
+    ).filter(([, count]) => count > 0);
+
+    if (unfounded.length > 0) {
+      addIssue(
+        ctx,
+        ["analyses", index, "sampleCoverage"],
+        `"NOT_COVERED" não admite ${unfounded.map(([field]) => field).join(", ")}: sem decisão que trate da questão, não há nada na amostra para sustentar essas afirmações.`,
+      );
+    }
+    return;
+  }
+
+  if (cited.size === 0) {
+    addIssue(
+      ctx,
+      ["analyses", index],
+      'toda questão jurídica precisa de uma conclusão amparada em pelo menos uma decisão real (HU-21). Se nenhuma das decisões analisadas trata desta questão, declare sampleCoverage: "NOT_COVERED" com as listas vazias — nunca vincule uma decisão que não trata do tema só para preencher o campo.',
+    );
+  }
+}
+
 function validateDecisionRefs(
   ctx: z.RefinementCtx,
   index: number,
@@ -81,14 +150,7 @@ function validateDecisionRefs(
     }
   }
 
-  const cited = new Set([...analysis.supportingDecisions, ...analysis.opposingDecisions, ...analysis.mixedDecisions]);
-  if (cited.size === 0) {
-    addIssue(
-      ctx,
-      ["analyses", index],
-      "toda questão jurídica precisa de uma conclusão amparada em pelo menos uma decisão real (HU-21).",
-    );
-  }
+  validateCoverage(ctx, index, analysis);
 
   const supportSide = new Set([...analysis.supportingDecisions, ...analysis.mixedDecisions]);
   const opposeSide = new Set([...analysis.opposingDecisions, ...analysis.mixedDecisions]);
@@ -180,6 +242,11 @@ function validateOppositionNotDropped(
   hasOpposingHoldings: boolean,
 ): void {
   if (!hasOpposingHoldings) return;
+
+  // Quando nenhuma questão foi coberta pela amostra, não há contraditório a omitir — só não há
+  // análise. Exigir aqui um contrário que nenhuma análise pode listar transformaria uma resposta
+  // honesta ("essas decisões não tratam do caso") em falha permanente de structured output.
+  if (!analyses.some((analysis) => analysis.sampleCoverage === "COVERED")) return;
 
   const surfaced = analyses.some(
     (analysis) => analysis.opposingDecisions.length > 0 || analysis.mixedDecisions.length > 0,

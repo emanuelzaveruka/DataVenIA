@@ -90,6 +90,7 @@ export function evidence(
 export function analysis(overrides: Partial<CrossFileAnalysis> = {}): CrossFileAnalysis {
   return {
     legalIssueId: "LI-1",
+    sampleCoverage: "COVERED",
     conclusion: "A 9ª Câmara vem reconhecendo a abusividade da negativa de cobertura.",
     supportingDecisions: ["SP-1", "SP-2", "SP-3", "SP-4", "SP-5", "SP-6"],
     opposingDecisions: ["SP-7", "SP-8", "SP-9"],

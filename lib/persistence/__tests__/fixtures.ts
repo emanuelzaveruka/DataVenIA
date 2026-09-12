@@ -155,6 +155,7 @@ export function scratchpadRecord(
 export function crossFileAnalysis(): CrossFileAnalysis {
   return {
     legalIssueId: "LI-1",
+    sampleCoverage: "COVERED",
     conclusion: "A Câmara reconhece a abusividade.",
     supportingDecisions: ["SP-1"],
     opposingDecisions: [],

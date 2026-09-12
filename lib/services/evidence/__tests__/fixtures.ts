@@ -52,6 +52,7 @@ export function scratchpadFor(
 export function crossFileAnalysis(overrides: Partial<CrossFileAnalysis> = {}): CrossFileAnalysis {
   return {
     legalIssueId: "LI-1",
+    sampleCoverage: "COVERED",
     conclusion: "Conclusão.",
     supportingDecisions: ["SP-1"],
     opposingDecisions: ["SP-2"],

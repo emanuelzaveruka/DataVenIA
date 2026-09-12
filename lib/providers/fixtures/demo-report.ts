@@ -155,6 +155,7 @@ function demoCrossFileAnalysis(scratchpads: DecisionScratchpad[]): CrossFileAnal
 
   return {
     legalIssueId: "LI-01",
+    sampleCoverage: "COVERED",
     conclusion:
       "As Câmaras analisadas reconhecem a abusividade da negativa quando há prescrição do médico assistente e a exclusão contratual é genérica, mas mantêm a negativa quando a exclusão é específica ou a carência foi regularmente pactuada.",
     supportingDecisions: supporting,
