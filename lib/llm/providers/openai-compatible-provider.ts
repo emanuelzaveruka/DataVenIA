@@ -21,6 +21,7 @@ export interface OpenAiCompatibleProviderConfig {
   apiUrl: string;
   apiKey: string;
   model: string;
+  maxTokensParameter?: "max_tokens" | "max_completion_tokens";
 }
 
 interface ChatCompletionResponse {
@@ -28,7 +29,7 @@ interface ChatCompletionResponse {
 }
 
 export function createOpenAiCompatibleProvider(config: OpenAiCompatibleProviderConfig): LlmProvider {
-  const { name, apiUrl, apiKey, model } = config;
+  const { name, apiUrl, apiKey, model, maxTokensParameter = "max_tokens" } = config;
   const errorPrefix = name.toUpperCase();
 
   return {
@@ -51,7 +52,7 @@ ${JSON.stringify(jsonSchema)}`;
           },
           body: JSON.stringify({
             model,
-            max_tokens: params.maxOutputTokens ?? 4096,
+            [maxTokensParameter]: params.maxOutputTokens ?? 4096,
             response_format: { type: "json_object" },
             messages: [
               { role: "system", content: systemWithSchema },

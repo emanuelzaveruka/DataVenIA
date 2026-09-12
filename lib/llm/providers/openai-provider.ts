@@ -20,5 +20,6 @@ export function createOpenAiProvider(config: OpenAiProviderConfig): LlmProvider 
     apiUrl: OPENAI_API_URL,
     apiKey: config.apiKey,
     model: config.model ?? DEFAULT_MODEL,
+    maxTokensParameter: "max_completion_tokens",
   });
 }
