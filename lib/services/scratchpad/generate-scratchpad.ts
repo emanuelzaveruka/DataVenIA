@@ -37,6 +37,7 @@ export async function generateScratchpad(
   provider: LlmProvider,
   jurisprudenceProvider: JurisprudenceProvider,
   cache: ScratchpadCache = NO_SCRATCHPAD_CACHE,
+  signal?: AbortSignal,
 ): Promise<ToolResult<DecisionScratchpad>> {
   // HU-33 — a consulta ao cache vem antes do fetch e antes do modelo: reaproveitar depois de já
   // ter pago as duas chamadas não economizaria nada.
@@ -70,6 +71,7 @@ export async function generateScratchpad(
     schema: ScratchpadContentSchema,
     schemaName: "DecisionScratchpadContent",
     schemaDescription: "Análise estruturada de uma única decisão, classificada por proposição jurídica.",
+    signal,
   });
 
   if (result.isError) {

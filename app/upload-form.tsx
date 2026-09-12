@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, useRef, type FormEvent } from "react";
 import type { FinalReport } from "../lib/schemas/report.schema";
 import type { PipelineStageEvent } from "../lib/workflow/pipeline-stage-event";
 import { ReportView } from "./report-view";
@@ -55,10 +55,23 @@ export function UploadForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<UploadSuccess | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  function handleCancel() {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsSubmitting(false);
+    setErrorMessage("Processamento cancelado pelo usuário.");
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!file) return;
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     setIsSubmitting(true);
     setResult(null);
@@ -68,7 +81,11 @@ export function UploadForm() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const response = await fetch("/api/documents", { method: "POST", body: formData });
+      const response = await fetch("/api/documents", {
+        method: "POST",
+        body: formData,
+        signal: controller.signal,
+      });
       const body = (await response.json()) as UploadSuccess | UploadErrorBody;
 
       if (!response.ok || "error" in body) {
@@ -81,10 +98,15 @@ export function UploadForm() {
       }
 
       setResult(body);
-    } catch {
-      setErrorMessage("Não foi possível conectar ao servidor. Tente novamente.");
+    } catch (err: unknown) {
+      if ((err as Error)?.name === "AbortError") {
+        setErrorMessage("Processamento cancelado pelo usuário.");
+      } else {
+        setErrorMessage("Não foi possível conectar ao servidor. Tente novamente.");
+      }
     } finally {
       setIsSubmitting(false);
+      abortControllerRef.current = null;
     }
   }
 
@@ -102,20 +124,33 @@ export function UploadForm() {
           className="rounded-lg border border-ink-500 bg-ink-100 p-2 text-sm text-ink-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-green dark:border-ink-500 dark:bg-ink-800 dark:text-ink-050"
         />
         <div className="flex gap-2">
-          <button
-            type="submit"
-            disabled={!file || isSubmitting}
-            className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-brand-navy px-4 py-2 text-sm font-medium text-brand-cream focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-green disabled:opacity-40 dark:bg-ink-050 dark:text-brand-navy"
-          >
-            {isSubmitting ? (
-              <>
+          {isSubmitting ? (
+            <div className="flex-1 flex gap-2">
+              <button
+                type="button"
+                disabled
+                className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-brand-navy px-4 py-2 text-sm font-medium text-brand-cream opacity-80 dark:bg-ink-050 dark:text-brand-navy"
+              >
                 <LoadingSpinner />
                 <span>Processando...</span>
-              </>
-            ) : (
-              "Enviar documento"
-            )}
-          </button>
+              </button>
+              <button
+                type="button"
+                onClick={handleCancel}
+                className="rounded-lg bg-red-600 hover:bg-red-500 px-4 py-2 text-sm font-medium text-white shadow transition"
+              >
+                🚫 Cancelar
+              </button>
+            </div>
+          ) : (
+            <button
+              type="submit"
+              disabled={!file}
+              className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-brand-navy px-4 py-2 text-sm font-medium text-brand-cream focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-green disabled:opacity-40 dark:bg-ink-050 dark:text-brand-navy"
+            >
+              Enviar documento
+            </button>
+          )}
           {result && (
             <button
               type="button"

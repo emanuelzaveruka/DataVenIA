@@ -8,6 +8,7 @@ export interface GenerateStructuredParams<T> {
   schemaName: string;
   schemaDescription?: string;
   maxOutputTokens?: number;
+  signal?: AbortSignal;
 }
 
 /**

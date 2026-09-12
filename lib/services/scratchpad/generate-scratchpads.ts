@@ -40,6 +40,7 @@ export async function generateScratchpads(
   jurisprudenceProvider: JurisprudenceProvider,
   concurrency: number = SCRATCHPAD_CONCURRENCY,
   cache: ScratchpadCache = NO_SCRATCHPAD_CACHE,
+  signal?: AbortSignal,
 ): Promise<ToolResult<ScratchpadBatchResult>> {
   if (candidates.length === 0) {
     return toolFailure(
@@ -56,8 +57,9 @@ export async function generateScratchpads(
 
   const outcomes = await runWithConcurrencyLimit(
     candidates,
-    (candidate) => generateScratchpad(candidate, provider, jurisprudenceProvider, cache),
+    (candidate) => generateScratchpad(candidate, provider, jurisprudenceProvider, cache, signal),
     concurrency,
+    signal,
   );
 
   const scratchpads: DecisionScratchpad[] = [];

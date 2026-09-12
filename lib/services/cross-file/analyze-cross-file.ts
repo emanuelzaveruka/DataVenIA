@@ -69,6 +69,7 @@ export async function analyzeCrossFile(
   caseAnalysis: CaseAnalysis,
   scratchpads: DecisionScratchpad[],
   provider: LlmProvider,
+  signal?: AbortSignal,
 ): Promise<ToolResult<CrossFileAnalysisResult>> {
   const validScratchpads = filterValidScratchpads(scratchpads);
 
@@ -110,6 +111,7 @@ export async function analyzeCrossFile(
     schemaName: "CrossFileAnalysis",
     schemaDescription:
       "Análise cruzada dos Scratchpads válidos, uma entrada por questão jurídica do caso.",
+    signal,
   });
 
   if (result.isError) {

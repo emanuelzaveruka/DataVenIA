@@ -13,6 +13,7 @@ import { buildQueryGenerationPrompt, QUERY_GENERATION_SYSTEM_PROMPT } from "./pr
 export async function generateSearchQueries(
   caseAnalysis: CaseAnalysis,
   provider: LlmProvider,
+  signal?: AbortSignal,
 ): Promise<ToolResult<SearchQueryPlan>> {
   const validLegalIssueIds = caseAnalysis.legalIssues.map((issue) => issue.id);
   const schema = buildSearchQueryPlanSchema(validLegalIssueIds);
@@ -23,6 +24,7 @@ export async function generateSearchQueries(
     schema,
     schemaName: "SearchQueryPlan",
     schemaDescription: "Conjunto de queries de pesquisa de jurisprudência com justificativa.",
+    signal,
   });
 
   if (result.isError) return result;

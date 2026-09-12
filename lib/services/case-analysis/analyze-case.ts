@@ -18,6 +18,7 @@ function countUsefulChars(text: string): number {
 export async function analyzeCase(
   document: SanitizedDocument,
   provider: LlmProvider,
+  signal?: AbortSignal,
 ): Promise<ToolResult<CaseAnalysis>> {
   const usefulChars = countUsefulChars(document.sanitizedText);
 
@@ -43,6 +44,7 @@ export async function analyzeCase(
     schema: CaseAnalysisSchema,
     schemaName: "CaseAnalysis",
     schemaDescription: "Análise estruturada do caso extraída do documento jurídico.",
+    signal,
   });
 
   if (result.isError) return result;

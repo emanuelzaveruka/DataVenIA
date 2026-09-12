@@ -50,6 +50,7 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): LlmPro
       try {
         response = await fetch(ANTHROPIC_API_URL, {
           method: "POST",
+          signal: params.signal,
           headers: {
             "content-type": "application/json",
             "x-api-key": config.apiKey,

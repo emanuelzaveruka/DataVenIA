@@ -63,6 +63,7 @@ ${JSON.stringify(jsonSchema)}`;
       try {
         response = await fetch(apiUrl, {
           method: "POST",
+          signal: params.signal,
           headers: {
             "content-type": "application/json",
             authorization: `Bearer ${apiKey}`,

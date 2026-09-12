@@ -263,7 +263,7 @@ export async function POST(request: Request) {
 
   const tCase = Date.now();
   const caseAnalysis = await guardedExecution.run("analyzeCase", () =>
-    analyzeCase(sanitized.data, llmProvider),
+    analyzeCase(sanitized.data, llmProvider, req.signal),
   );
   if (caseAnalysis.isError) {
     recorder.record("DOCUMENT_ANALYSIS", "Análise de Caso (LLM)", "FAILED", tCase, {
@@ -297,7 +297,7 @@ export async function POST(request: Request) {
 
   const tQueries = Date.now();
   const queryPlan = await guardedExecution.run("generateSearchQueries", () =>
-    generateSearchQueries(caseAnalysis.data, llmProvider),
+    generateSearchQueries(caseAnalysis.data, llmProvider, req.signal),
   );
   if (queryPlan.isError) {
     recorder.record("QUERY_GENERATION", "Geração de Queries", "FAILED", tQueries, {
@@ -325,6 +325,7 @@ export async function POST(request: Request) {
   const foundItems: JurisprudenceSearchItem[] = [];
   const jurisprudenceSources = new Set<string>();
   for (const searchQuery of queryPlan.data.queries) {
+    if (req.signal.aborted) break;
     const query = { query: searchQuery.query };
     const searchResult = await guardedExecution.run("searchJurisprudence", () =>
       jurisprudenceProvider.search(query),
@@ -386,7 +387,7 @@ export async function POST(request: Request) {
   const versions = scratchpadVersions(llmProvider);
   const scratchpadCache = createRepositoryScratchpadCache({ repository, runId, versions });
   const scratchpadBatch = await guardedExecution.run("generateScratchpads", () =>
-    generateScratchpads(selected.data, llmProvider, jurisprudenceProvider, undefined, scratchpadCache),
+    generateScratchpads(selected.data, llmProvider, jurisprudenceProvider, undefined, scratchpadCache, req.signal),
   );
   if (scratchpadBatch.isError) {
     recorder.record("SCRATCHPAD_GENERATION", "Geração de Scratchpads", "FAILED", tScratch, {
@@ -423,7 +424,7 @@ export async function POST(request: Request) {
 
   const tCross = Date.now();
   const crossFile = await guardedExecution.run("analyzeCrossFile", () =>
-    analyzeCrossFile(caseAnalysis.data, scratchpadBatch.data.scratchpads, llmProvider),
+    analyzeCrossFile(caseAnalysis.data, scratchpadBatch.data.scratchpads, llmProvider, req.signal),
   );
   if (crossFile.isError) {
     recorder.record("CROSS_FILE_ANALYSIS", "Análise Cruzada", "FAILED", tCross, {

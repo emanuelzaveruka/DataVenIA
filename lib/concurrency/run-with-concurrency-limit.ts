@@ -12,12 +12,14 @@ export async function runWithConcurrencyLimit<Item, Result>(
   items: readonly Item[],
   worker: (item: Item, index: number) => Promise<Result>,
   concurrency: number,
+  signal?: AbortSignal,
 ): Promise<Result[]> {
   const results = new Array<Result>(items.length);
   let cursor = 0;
 
   async function runLoop(): Promise<void> {
     while (cursor < items.length) {
+      if (signal?.aborted) break;
       const index = cursor;
       cursor += 1;
       results[index] = await worker(items[index] as Item, index);
