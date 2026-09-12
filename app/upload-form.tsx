@@ -2,7 +2,9 @@
 
 import { useState, type FormEvent } from "react";
 import type { FinalReport } from "../lib/schemas/report.schema";
+import type { PipelineStageEvent } from "../lib/workflow/pipeline-stage-event";
 import { ReportView } from "./report-view";
+import { N8nExecutionView } from "./components/n8n-execution-view";
 
 interface RedactionSummary {
   type: string;
@@ -26,6 +28,7 @@ interface UploadSuccess {
   metadata: { pageCount?: number; hash: string };
   sanitizedTextPreview: string;
   redactions: RedactionSummary[];
+  stages?: PipelineStageEvent[];
   progress: PipelineProgressStep[];
   provider?: { llm: string; model: string; jurisprudence: string };
   scratchpads?: { requested: number; processed: number; failed: number; status: string };
@@ -85,6 +88,8 @@ export function UploadForm() {
     }
   }
 
+  const [isN8nModalOpen, setIsN8nModalOpen] = useState(false);
+
   const displayProgress = result?.progress ?? (isSubmitting ? PENDING_PROGRESS : null);
 
   return (
@@ -96,41 +101,66 @@ export function UploadForm() {
           onChange={(event) => setFile(event.target.files?.[0] ?? null)}
           className="rounded-lg border border-ink-500 bg-ink-100 p-2 text-sm text-ink-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-green dark:border-ink-500 dark:bg-ink-800 dark:text-ink-050"
         />
-        <button
-          type="submit"
-          disabled={!file || isSubmitting}
-          className="flex items-center justify-center gap-2 rounded-lg bg-brand-navy px-4 py-2 text-sm font-medium text-brand-cream focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-green disabled:opacity-40 dark:bg-ink-050 dark:text-brand-navy"
-        >
-          {isSubmitting ? (
-            <>
-              <LoadingSpinner />
-              <span>Processando...</span>
-            </>
-          ) : (
-            "Enviar documento"
+        <div className="flex gap-2">
+          <button
+            type="submit"
+            disabled={!file || isSubmitting}
+            className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-brand-navy px-4 py-2 text-sm font-medium text-brand-cream focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-green disabled:opacity-40 dark:bg-ink-050 dark:text-brand-navy"
+          >
+            {isSubmitting ? (
+              <>
+                <LoadingSpinner />
+                <span>Processando...</span>
+              </>
+            ) : (
+              "Enviar documento"
+            )}
+          </button>
+          {result?.stages && (
+            <button
+              type="button"
+              onClick={() => setIsN8nModalOpen(true)}
+              className="flex items-center gap-2 rounded-lg bg-orange-600 hover:bg-orange-500 px-4 py-2 text-sm font-medium text-white shadow transition"
+            >
+              <span>⚡ Ver Execução (N8n Style)</span>
+            </button>
           )}
-        </button>
+        </div>
       </form>
 
       {displayProgress && (
-        <ul className="flex flex-col gap-2 rounded-lg border border-ink-300 p-4 text-sm dark:border-ink-700">
-          {displayProgress.map((step, index) => {
-            const isCurrentStep = isSubmitting && !step.done && (index === 0 || displayProgress[index - 1]?.done);
-            return (
-              <li key={`${step.stage}-${step.label}`} className="flex items-center gap-2.5">
-                {isCurrentStep ? (
-                  <LoadingSpinner className="h-3.5 w-3.5 text-brand-navy dark:text-brand-cream" />
-                ) : (
-                  <StatusDot status={step.done ? "COMPLETED" : undefined} />
-                )}
-                <span className={isCurrentStep ? "font-medium text-ink-900 dark:text-ink-050" : "text-ink-600 dark:text-ink-400"}>
-                  {step.label}
-                  {typeof step.count === "number" ? ` (${step.count})` : ""}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
+        <div className="flex flex-col gap-2 rounded-lg border border-ink-300 p-4 text-sm dark:border-ink-700">
+          <div className="flex items-center justify-between mb-1">
+            <span className="font-semibold text-ink-900 dark:text-ink-050">Progresso do Pipeline</span>
+            {result?.stages && (
+              <button
+                type="button"
+                onClick={() => setIsN8nModalOpen(true)}
+                className="text-xs text-orange-500 hover:text-orange-400 font-medium underline flex items-center gap-1"
+              >
+                <span>⚡ Inspecionar Nós & Payloads (N8n)</span>
+              </button>
+            )}
+          </div>
+          <ul className="flex flex-col gap-2">
+            {displayProgress.map((step, index) => {
+              const isCurrentStep = isSubmitting && !step.done && (index === 0 || displayProgress[index - 1]?.done);
+              return (
+                <li key={`${step.stage}-${step.label}`} className="flex items-center gap-2.5">
+                  {isCurrentStep ? (
+                    <LoadingSpinner className="h-3.5 w-3.5 text-brand-navy dark:text-brand-cream" />
+                  ) : (
+                    <StatusDot status={step.done ? "COMPLETED" : undefined} />
+                  )}
+                  <span className={isCurrentStep ? "font-medium text-ink-900 dark:text-ink-050" : "text-ink-600 dark:text-ink-400"}>
+                    {step.label}
+                    {typeof step.count === "number" ? ` (${step.count})` : ""}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       )}
 
       {errorMessage && (
@@ -142,7 +172,16 @@ export function UploadForm() {
       {result && (
         <>
           <div className="rounded-lg border border-ink-300 p-4 text-sm dark:border-ink-700">
-            <p className="font-medium">Documento processado</p>
+            <div className="flex items-center justify-between">
+              <p className="font-medium">Documento processado</p>
+              <button
+                type="button"
+                onClick={() => setIsN8nModalOpen(true)}
+                className="px-3 py-1 bg-orange-500/10 hover:bg-orange-500/20 text-orange-500 border border-orange-500/30 rounded text-xs font-semibold transition"
+              >
+                ⚡ Abrir N8n Inspector
+              </button>
+            </div>
             <p className="mt-1 text-ink-600 dark:text-ink-400">
               {result.fileName} · {result.metadata.pageCount ? `${result.metadata.pageCount} página(s)` : ""}
             </p>
@@ -179,6 +218,14 @@ export function UploadForm() {
           </div>
 
           <ReportView report={result.report} />
+
+          <N8nExecutionView
+            isOpen={isN8nModalOpen}
+            onClose={() => setIsN8nModalOpen(false)}
+            events={result.stages || []}
+            traceId={result.traceId}
+            runId={result.runId}
+          />
         </>
       )}
     </div>

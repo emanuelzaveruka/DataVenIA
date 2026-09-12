@@ -131,6 +131,7 @@ export async function analyzeCrossFile(
         operation: "analyzeCrossFile",
         metadata: {
           ...error.metadata,
+          validationIssues: error.metadata?.issues,
           scratchpadCount: validScratchpads.length,
           legalIssueCount: caseAnalysis.legalIssues.length,
         },

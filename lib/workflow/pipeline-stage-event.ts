@@ -1,24 +1,75 @@
-export type PipelineStageStatus = "COMPLETED" | "FAILED";
+export type PipelineStageStatus = "IDLE" | "RUNNING" | "COMPLETED" | "FAILED" | "SKIPPED";
+
+export interface NodeExecutionDetail {
+  id: string;
+  stage: string;
+  nodeName: string;
+  status: PipelineStageStatus;
+  startedAt?: string;
+  completedAt?: string;
+  durationMs: number;
+  input?: Record<string, unknown> | unknown;
+  output?: Record<string, unknown> | unknown;
+  error?: {
+    code?: string;
+    message: string;
+    description?: string;
+    details?: unknown;
+  };
+  logs?: string[];
+}
 
 export interface PipelineStageEvent {
   stage: string;
   status: PipelineStageStatus;
   label: string;
   durationMs: number;
+  nodeDetail?: NodeExecutionDetail;
 }
 
 /**
- * Log de progresso exibido ao usuário (HU-04). Nesta fase o pipeline de ingestão é síncrono e
- * rápido (sem chamada a modelo), então o log chega completo numa única resposta; observabilidade
- * incremental/streaming real (§11.9) entra na Fase 8 com HU-35.
+ * Log de progresso exibido ao usuário (HU-04 / N8n Inspector).
  */
 export function createStageRecorder() {
   const events: PipelineStageEvent[] = [];
+  const nodeDetails: NodeExecutionDetail[] = [];
 
   return {
     events,
-    record(stage: string, label: string, status: PipelineStageStatus, startedAt: number): void {
-      events.push({ stage, label, status, durationMs: Date.now() - startedAt });
+    nodeDetails,
+    record(
+      stage: string,
+      label: string,
+      status: PipelineStageStatus,
+      startedAt: number,
+      detail?: Partial<NodeExecutionDetail>,
+    ): void {
+      const now = Date.now();
+      const durationMs = now - startedAt;
+
+      const nodeDetail: NodeExecutionDetail = {
+        id: detail?.id || `node-${events.length + 1}-${stage.toLowerCase()}`,
+        stage,
+        nodeName: detail?.nodeName || label,
+        status,
+        startedAt: new Date(startedAt).toISOString(),
+        completedAt: new Date(now).toISOString(),
+        durationMs,
+        input: detail?.input,
+        output: detail?.output,
+        error: detail?.error,
+        logs: detail?.logs || [`[${new Date(now).toLocaleTimeString()}] Status: ${status}`],
+      };
+
+      nodeDetails.push(nodeDetail);
+      events.push({
+        stage,
+        label,
+        status,
+        durationMs,
+        nodeDetail,
+      });
     },
   };
 }
+

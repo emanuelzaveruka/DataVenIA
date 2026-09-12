@@ -36,8 +36,17 @@ export function postToolUse<T>(
       result,
     );
   } else if (result.isError) {
+    const { code, category, description, userMessage, metadata } = result.error;
+    let detailStr = "";
+    if (metadata && Object.keys(metadata).length > 0) {
+      detailStr = `\n  Metadata: ${JSON.stringify(metadata, null, 2)}`;
+    }
     console.error(
-      `[postToolUse] ${context.stage}/${context.toolName} failed: ${result.error.code} (${result.error.category})`,
+      `[postToolUse] ❌ ${context.stage}/${context.toolName} failed!\n` +
+      `  Code: ${code} (${category})\n` +
+      `  Description: ${description}` +
+      (userMessage ? `\n  UserMessage: ${userMessage}` : "") +
+      detailStr,
     );
   }
 
