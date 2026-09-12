@@ -44,53 +44,105 @@ export interface PipelineStageEvent {
   nodeDetail?: NodeExecutionDetail;
 }
 
+export interface StageRecorder {
+  readonly events: PipelineStageEvent[];
+  readonly nodeDetails: NodeExecutionDetail[];
+  /**
+   * Evento de início de nó, para quem acompanha a execução ao vivo (HU-04/HU-35). **Não acumula**
+   * em `events`: o array final continua contendo só estados terminais, que é o que o payload da
+   * resposta sempre carregou — um `RUNNING` sobrevivente ali seria um nó que nunca terminou.
+   */
+  start(stage: string, label: string, detail?: Partial<NodeExecutionDetail>): PipelineStageEvent;
+  record(
+    stage: string,
+    label: string,
+    status: PipelineStageStatus,
+    startedAt: number,
+    detail?: Partial<NodeExecutionDetail>,
+  ): PipelineStageEvent;
+}
+
+function buildNodeDetail(
+  stage: string,
+  label: string,
+  status: PipelineStageStatus,
+  startedAt: number,
+  completedAtMs: number,
+  fallbackIndex: number,
+  detail?: Partial<NodeExecutionDetail>,
+): NodeExecutionDetail {
+  return {
+    id: detail?.id || `node-${fallbackIndex}-${stage.toLowerCase()}`,
+    stage,
+    nodeName: detail?.nodeName || label,
+    status,
+    startedAt: new Date(startedAt).toISOString(),
+    completedAt: status === "RUNNING" ? undefined : new Date(completedAtMs).toISOString(),
+    durationMs: completedAtMs - startedAt,
+    agentName: detail?.agentName,
+    agentRole: detail?.agentRole,
+    agentIcon: detail?.agentIcon,
+    subTasks: detail?.subTasks,
+    input: detail?.input,
+    output: detail?.output,
+    error: detail?.error,
+    logs:
+      detail?.logs ||
+      [`[${new Date(completedAtMs).toLocaleTimeString()}] Status: ${status}`],
+  };
+}
+
 /**
  * Log de progresso exibido ao usuário (HU-04 / N8n Inspector).
+ *
+ * `record` devolve o evento além de acumulá-lo: é o que permite ao orquestrador emiti-lo ao vivo
+ * sem manter um segundo canal em paralelo com o array.
  */
-export function createStageRecorder() {
+export function createStageRecorder(): StageRecorder {
   const events: PipelineStageEvent[] = [];
   const nodeDetails: NodeExecutionDetail[] = [];
 
   return {
     events,
     nodeDetails,
-    record(
-      stage: string,
-      label: string,
-      status: PipelineStageStatus,
-      startedAt: number,
-      detail?: Partial<NodeExecutionDetail>,
-    ): void {
-      const now = Date.now();
-      const durationMs = now - startedAt;
 
-      const nodeDetail: NodeExecutionDetail = {
-        id: detail?.id || `node-${events.length + 1}-${stage.toLowerCase()}`,
+    start(stage, label, detail) {
+      const startedAt = Date.now();
+      const nodeDetail = buildNodeDetail(
         stage,
-        nodeName: detail?.nodeName || label,
-        status,
-        startedAt: new Date(startedAt).toISOString(),
-        completedAt: new Date(now).toISOString(),
-        durationMs,
-        agentName: detail?.agentName,
-        agentRole: detail?.agentRole,
-        agentIcon: detail?.agentIcon,
-        subTasks: detail?.subTasks,
-        input: detail?.input,
-        output: detail?.output,
-        error: detail?.error,
-        logs: detail?.logs || [`[${new Date(now).toLocaleTimeString()}] Status: ${status}`],
-      };
+        label,
+        "RUNNING",
+        startedAt,
+        startedAt,
+        events.length + 1,
+        detail,
+      );
 
-      nodeDetails.push(nodeDetail);
-      events.push({
+      return { stage, label, status: "RUNNING", durationMs: 0, nodeDetail };
+    },
+
+    record(stage, label, status, startedAt, detail) {
+      const now = Date.now();
+      const nodeDetail = buildNodeDetail(
         stage,
         label,
         status,
-        durationMs,
+        startedAt,
+        now,
+        events.length + 1,
+        detail,
+      );
+
+      nodeDetails.push(nodeDetail);
+      const event: PipelineStageEvent = {
+        stage,
+        label,
+        status,
+        durationMs: nodeDetail.durationMs,
         nodeDetail,
-      });
+      };
+      events.push(event);
+      return event;
     },
   };
 }
-

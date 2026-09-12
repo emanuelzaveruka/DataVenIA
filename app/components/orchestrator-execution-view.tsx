@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import type { PipelineStageEvent, NodeExecutionDetail, AgentTaskInfo } from "../../lib/workflow/pipeline-stage-event";
 
 interface OrchestratorExecutionViewProps {
@@ -106,9 +106,20 @@ export function OrchestratorExecutionView({
   isStreaming = false,
 }: OrchestratorExecutionViewProps) {
   const [viewMode, setViewMode] = useState<"delegation" | "n8n">("delegation");
-  const [selectedNode, setSelectedNode] = useState<NodeExecutionDetail | null>(null);
-  const [selectedSubTask, setSelectedSubTask] = useState<AgentTaskInfo | null>(null);
+  /**
+   * Guarda o **id**, não o nó. Ao vivo cada etapa chega duas vezes (RUNNING e depois
+   * COMPLETED/FAILED); segurar o objeto congelaria o painel lateral na versão antiga para sempre.
+   */
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedSubTaskId, setSelectedSubTaskId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"output" | "input" | "logs" | "subtasks" | "error">("output");
+  const canvasRef = useRef<HTMLDivElement>(null);
+
+  // Precisa ficar acima do `if (!isOpen)`: hook depois de um early return quebra a ordem em runtime.
+  useEffect(() => {
+    if (!isOpen || !isStreaming) return;
+    canvasRef.current?.scrollTo({ top: canvasRef.current.scrollHeight, behavior: "smooth" });
+  }, [isOpen, isStreaming, events.length]);
 
   if (!isOpen) return null;
 
@@ -124,6 +135,10 @@ export function OrchestratorExecutionView({
       logs: [`Step ${event.label} finalizado com status ${event.status}`],
     };
   });
+
+  const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
+  const selectedSubTask =
+    selectedNode?.subTasks?.find((task) => task.id === selectedSubTaskId) ?? null;
 
   // Calculate stats & active stage
   const completedNodes = nodes.filter((n) => n.status === "COMPLETED");
@@ -254,7 +269,7 @@ export function OrchestratorExecutionView({
         {/* Main Content Area */}
         <div className="flex-1 flex overflow-hidden">
           {/* LEFT: Main Visual Canvas */}
-          <div className="flex-1 p-6 overflow-y-auto bg-slate-950/30 border-r border-slate-800">
+          <div ref={canvasRef} className="flex-1 p-6 overflow-y-auto bg-slate-950/30 border-r border-slate-800">
             {viewMode === "delegation" ? (
               /* DELEGATION CANVAS MODE */
               <div className="flex flex-col gap-6 max-w-5xl mx-auto">
@@ -321,8 +336,8 @@ export function OrchestratorExecutionView({
                           key={subAgent.id}
                           onClick={() => {
                             if (primaryNode) {
-                              setSelectedNode(primaryNode);
-                              setSelectedSubTask(null);
+                              setSelectedNodeId(primaryNode?.id ?? null);
+                              setSelectedSubTaskId(null);
                               if (primaryNode.error) setActiveTab("error");
                               else if (primaryNode.subTasks && primaryNode.subTasks.length > 0) setActiveTab("subtasks");
                               else if (primaryNode.output) setActiveTab("output");
@@ -386,7 +401,10 @@ export function OrchestratorExecutionView({
                           {primaryNode && (
                             <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-xs font-mono text-slate-400">
                               <span>
-                                Duração: <strong className="text-slate-200">{primaryNode.durationMs}ms</strong>
+                                Duração:{" "}
+                                <strong className="text-slate-200">
+                                  {primaryNode.status === "RUNNING" ? "em andamento" : `${primaryNode.durationMs}ms`}
+                                </strong>
                               </span>
 
                               {primaryNode.subTasks && primaryNode.subTasks.length > 0 ? (
@@ -428,8 +446,8 @@ export function OrchestratorExecutionView({
                       )}
                       <div
                         onClick={() => {
-                          setSelectedNode(node);
-                          setSelectedSubTask(null);
+                          setSelectedNodeId(node.id);
+                          setSelectedSubTaskId(null);
                           if (node.error) setActiveTab("error");
                           else if (node.subTasks && node.subTasks.length > 0) setActiveTab("subtasks");
                           else if (node.output) setActiveTab("output");
@@ -440,6 +458,8 @@ export function OrchestratorExecutionView({
                             ? "bg-rose-950/20 border-rose-500/50 hover:border-rose-400"
                             : node.status === "COMPLETED"
                             ? "bg-slate-900 border-slate-800 hover:border-emerald-500/50"
+                            : node.status === "RUNNING"
+                            ? "bg-sky-950/30 border-sky-500/60 animate-pulse"
                             : "bg-slate-900/50 border-slate-800 opacity-60"
                         } ${isSelected ? "ring-2 ring-orange-500/80 shadow-lg shadow-orange-500/10" : ""}`}
                       >
@@ -457,7 +477,7 @@ export function OrchestratorExecutionView({
 
                         <div className="flex items-center gap-3">
                           <span className="text-xs text-slate-400 font-mono">
-                            {node.durationMs}ms
+                            {node.status === "RUNNING" ? "em andamento" : `${node.durationMs}ms`}
                           </span>
                           {getStatusBadge(node.status)}
                         </div>
@@ -491,7 +511,11 @@ export function OrchestratorExecutionView({
                     </p>
                   )}
                   <p className="text-xs text-slate-400 font-mono mt-1 pt-1 border-t border-slate-800/60">
-                    Duração: <strong className="text-slate-200">{selectedNode.durationMs}ms</strong> | Stage:{" "}
+                    Duração:{" "}
+                    <strong className="text-slate-200">
+                      {selectedNode.status === "RUNNING" ? "em andamento" : `${selectedNode.durationMs}ms`}
+                    </strong>{" "}
+                    | Stage:{" "}
                     <span className="text-indigo-300 font-semibold">{selectedNode.stage}</span>
                   </p>
                 </div>
@@ -499,7 +523,7 @@ export function OrchestratorExecutionView({
                 {/* Tabs Header */}
                 <div className="flex border-b border-slate-800 bg-slate-950/80 px-4 text-xs font-medium overflow-x-auto">
                   <button
-                    onClick={() => { setActiveTab("output"); setSelectedSubTask(null); }}
+                    onClick={() => { setActiveTab("output"); setSelectedSubTaskId(null); }}
                     className={`px-3 py-2.5 border-b-2 transition font-mono whitespace-nowrap ${
                       activeTab === "output"
                         ? "border-indigo-500 text-indigo-400 font-bold"
@@ -509,7 +533,7 @@ export function OrchestratorExecutionView({
                     Output Payload
                   </button>
                   <button
-                    onClick={() => { setActiveTab("input"); setSelectedSubTask(null); }}
+                    onClick={() => { setActiveTab("input"); setSelectedSubTaskId(null); }}
                     className={`px-3 py-2.5 border-b-2 transition font-mono whitespace-nowrap ${
                       activeTab === "input"
                         ? "border-indigo-500 text-indigo-400 font-bold"
@@ -533,7 +557,7 @@ export function OrchestratorExecutionView({
                   )}
 
                   <button
-                    onClick={() => { setActiveTab("logs"); setSelectedSubTask(null); }}
+                    onClick={() => { setActiveTab("logs"); setSelectedSubTaskId(null); }}
                     className={`px-3 py-2.5 border-b-2 transition font-mono whitespace-nowrap ${
                       activeTab === "logs"
                         ? "border-indigo-500 text-indigo-400 font-bold"
@@ -544,7 +568,7 @@ export function OrchestratorExecutionView({
                   </button>
                   {selectedNode.error && (
                     <button
-                      onClick={() => { setActiveTab("error"); setSelectedSubTask(null); }}
+                      onClick={() => { setActiveTab("error"); setSelectedSubTaskId(null); }}
                       className={`px-3 py-2.5 border-b-2 transition font-mono whitespace-nowrap ${
                         activeTab === "error"
                           ? "border-rose-500 text-rose-400 font-bold"
@@ -585,7 +609,7 @@ export function OrchestratorExecutionView({
                           return (
                             <div
                               key={task.id}
-                              onClick={() => setSelectedSubTask(isTaskSelected ? null : task)}
+                              onClick={() => setSelectedSubTaskId(isTaskSelected ? null : task.id)}
                               className={`p-3 rounded-xl border transition cursor-pointer ${
                                 isTaskSelected
                                   ? "bg-indigo-950/40 border-indigo-500 text-indigo-200"
@@ -620,7 +644,7 @@ export function OrchestratorExecutionView({
                           </div>
                         ))
                       ) : (
-                        <p className="text-slate-500">// Nenhum log capturado nesta etapa.</p>
+                        <p className="text-slate-500">{"// Nenhum log capturado nesta etapa."}</p>
                       )}
                     </div>
                   )}
