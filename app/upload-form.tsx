@@ -1,60 +1,44 @@
 "use client";
 
 import { useState, useRef, type FormEvent } from "react";
-import type { FinalReport } from "../lib/schemas/report.schema";
 import type { PipelineStageEvent } from "../lib/workflow/pipeline-stage-event";
+import type { PipelineEvent, PipelineResultPayload } from "../lib/workflow/run-pipeline";
+import {
+  buildPipelineProgress,
+  type PipelineProgressStep,
+} from "../lib/observability/pipeline-progress";
+import { readNdjson } from "../lib/streaming/ndjson";
 import { ReportView } from "./report-view";
 import { N8nExecutionView } from "./components/n8n-execution-view";
 
-interface RedactionSummary {
-  type: string;
-  marker: string;
-  count: number;
-}
-
-interface PipelineProgressStep {
-  stage: string;
-  label: string;
-  count?: number;
-  done: boolean;
-}
-
-interface UploadSuccess {
-  runId: string;
-  traceId: string;
-  documentId: string;
-  fileName: string;
-  mimeType: string;
-  metadata: { pageCount?: number; hash: string };
-  sanitizedTextPreview: string;
-  redactions: RedactionSummary[];
-  stages?: PipelineStageEvent[];
-  progress: PipelineProgressStep[];
-  provider?: { llm: string; model: string; jurisprudence: string };
-  scratchpads?: { requested: number; processed: number; failed: number; status: string };
-  report: FinalReport;
-}
+type UploadSuccess = PipelineResultPayload;
 
 interface UploadErrorBody {
-  error: { code?: string; userMessage?: string; description?: string };
+  error?: { code?: string; userMessage?: string; description?: string };
 }
 
-const PENDING_PROGRESS: PipelineProgressStep[] = [
-  { stage: "INGESTION", label: "Documento processado", done: false },
-  { stage: "QUERY_GENERATION", label: "Queries de pesquisa geradas", done: false },
-  { stage: "SEARCH", label: "Candidatos encontrados", done: false },
-  { stage: "SCRATCHPAD_SELECTION", label: "Decisões selecionadas para análise profunda", done: false },
-  { stage: "SCRATCHPAD_GENERATION", label: "Scratchpads válidos", done: false },
-  { stage: "CROSS_FILE_ANALYSIS", label: "Análise cruzada concluída", done: false },
-  { stage: "EVIDENCE_VERIFICATION", label: "Evidências verificadas na fonte oficial", done: false },
-  { stage: "REPORT_GENERATION", label: "Relatório pronto", done: false },
-];
+/**
+ * Um nó chega duas vezes: RUNNING quando começa e COMPLETED/FAILED quando termina. O casamento
+ * é pelo `nodeDetail.id`, que o recorder mantém estável entre os dois — empilhar cegamente
+ * mostraria cada etapa duplicada no inspector.
+ */
+function mergeStage(previous: PipelineStageEvent[], incoming: PipelineStageEvent): PipelineStageEvent[] {
+  const id = incoming.nodeDetail?.id;
+  const index = id ? previous.findIndex((event) => event.nodeDetail?.id === id) : -1;
+  if (index === -1) return [...previous, incoming];
+  const next = previous.slice();
+  next[index] = incoming;
+  return next;
+}
 
 export function UploadForm() {
   const [file, setFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<UploadSuccess | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [liveStages, setLiveStages] = useState<PipelineStageEvent[]>([]);
+  const [liveProgress, setLiveProgress] = useState<PipelineProgressStep[] | null>(null);
+  const [liveRun, setLiveRun] = useState<{ runId: string; traceId: string } | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   function handleCancel() {
@@ -76,6 +60,9 @@ export function UploadForm() {
     setIsSubmitting(true);
     setResult(null);
     setErrorMessage(null);
+    setLiveStages([]);
+    setLiveProgress(null);
+    setLiveRun(null);
 
     try {
       const formData = new FormData();
@@ -86,18 +73,46 @@ export function UploadForm() {
         body: formData,
         signal: controller.signal,
       });
-      const body = (await response.json()) as UploadSuccess | UploadErrorBody;
 
-      if (!response.ok || "error" in body) {
-        const message =
-          "error" in body
-            ? body.error.userMessage ?? body.error.description ?? "Falha ao processar o arquivo."
-            : "Falha ao processar o arquivo.";
-        setErrorMessage(message);
+      // Falhas anteriores à abertura do stream (arquivo ausente, credencial faltando) continuam
+      // chegando como JSON único com status HTTP real.
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!contentType.includes("ndjson") || !response.body) {
+        const body = (await response.json()) as UploadErrorBody;
+        setErrorMessage(
+          body.error?.userMessage ?? body.error?.description ?? "Falha ao processar o arquivo.",
+        );
         return;
       }
 
-      setResult(body);
+      let sawTerminalEvent = false;
+      for await (const event of readNdjson<PipelineEvent>(response.body)) {
+        switch (event.type) {
+          case "start":
+            setLiveRun({ runId: event.runId, traceId: event.traceId });
+            break;
+          case "stage":
+            setLiveStages((previous) => mergeStage(previous, event.event));
+            break;
+          case "progress":
+            setLiveProgress(event.steps);
+            break;
+          case "result":
+            sawTerminalEvent = true;
+            setResult(event.payload);
+            break;
+          case "error":
+            sawTerminalEvent = true;
+            setErrorMessage(
+              event.error.userMessage ?? event.error.description ?? "Falha ao processar o arquivo.",
+            );
+            break;
+        }
+      }
+
+      if (!sawTerminalEvent) {
+        setErrorMessage("A conexão foi interrompida antes do fim da análise.");
+      }
     } catch (err: unknown) {
       if ((err as Error)?.name === "AbortError") {
         setErrorMessage("Processamento cancelado pelo usuário.");
@@ -112,7 +127,12 @@ export function UploadForm() {
 
   const [isN8nModalOpen, setIsN8nModalOpen] = useState(false);
 
-  const displayProgress = result?.progress ?? (isSubmitting ? PENDING_PROGRESS : null);
+  // `buildPipelineProgress({})` devolve a mesma lista "tudo pendente" que antes era uma constante
+  // duplicada à mão aqui — e que, de quebra, citava um stage inexistente (SCRATCHPAD_SELECTION).
+  const displayProgress =
+    result?.progress ?? liveProgress ?? (isSubmitting ? buildPipelineProgress({}) : null);
+  const timelineEvents = result?.stages ?? liveStages;
+  const hasTimeline = timelineEvents.length > 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -151,7 +171,7 @@ export function UploadForm() {
               Enviar documento
             </button>
           )}
-          {result ? (
+          {result || (hasTimeline && !isSubmitting) ? (
             <button
               type="button"
               onClick={() => setIsN8nModalOpen(true)}
@@ -265,9 +285,10 @@ export function UploadForm() {
       <N8nExecutionView
         isOpen={isN8nModalOpen}
         onClose={() => setIsN8nModalOpen(false)}
-        events={result?.stages || []}
-        traceId={result?.traceId}
-        runId={result?.runId}
+        events={timelineEvents}
+        traceId={result?.traceId ?? liveRun?.traceId}
+        runId={result?.runId ?? liveRun?.runId}
+        isStreaming={isSubmitting}
       />
     </div>
   );

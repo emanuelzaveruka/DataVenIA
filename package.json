@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "watch:run": "node scripts/watch-run.mjs",
     "import:competencias": "node scripts/import-competencias.mjs"
   },
   "dependencies": {
