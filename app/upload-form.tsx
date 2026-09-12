@@ -151,28 +151,36 @@ export function UploadForm() {
               Enviar documento
             </button>
           )}
-          {result && (
+          {result ? (
             <button
               type="button"
               onClick={() => setIsN8nModalOpen(true)}
-              className="flex items-center gap-2 rounded-lg bg-orange-600 hover:bg-orange-500 px-4 py-2 text-sm font-medium text-white shadow transition"
+              className="flex items-center justify-center gap-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 px-4 py-2 text-sm font-medium text-white shadow transition"
             >
-              <span>⚡ Ver Execução (N8n Style)</span>
+              <span>🤖 Ver Delegação de Agentes</span>
             </button>
-          )}
+          ) : isSubmitting ? (
+            <button
+              type="button"
+              onClick={() => setIsN8nModalOpen(true)}
+              className="flex items-center justify-center gap-2 rounded-lg bg-indigo-900/60 hover:bg-indigo-900 text-indigo-200 border border-indigo-500/40 px-3 py-2 text-sm font-medium shadow transition"
+            >
+              <span>🤖 Acompanhar Agentes</span>
+            </button>
+          ) : null}
         </div>
       </form>
 
       {displayProgress && (
         <div className="flex flex-col gap-2 rounded-lg border border-ink-300 p-4 text-sm dark:border-ink-700">
           <div className="flex items-center justify-between mb-1">
-            <span className="font-semibold text-ink-900 dark:text-ink-050">Progresso do Pipeline</span>
+            <span className="font-semibold text-ink-900 dark:text-ink-050">Progresso do Pipeline de Agentes</span>
             <button
               type="button"
               onClick={() => setIsN8nModalOpen(true)}
-              className="text-xs bg-orange-500/10 hover:bg-orange-500/20 text-orange-500 border border-orange-500/30 px-2 py-1 rounded font-medium flex items-center gap-1 transition"
+              className="text-xs bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 px-2.5 py-1 rounded font-medium flex items-center gap-1.5 transition"
             >
-              <span>⚡ Abrir N8n Inspector</span>
+              <span>🤖 Abrir Orquestrador de Agentes</span>
             </button>
           </div>
           <ul className="flex flex-col gap-2">
@@ -210,9 +218,9 @@ export function UploadForm() {
               <button
                 type="button"
                 onClick={() => setIsN8nModalOpen(true)}
-                className="px-3 py-1 bg-orange-500/10 hover:bg-orange-500/20 text-orange-500 border border-orange-500/30 rounded text-xs font-semibold transition"
+                className="px-3 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 rounded text-xs font-semibold transition flex items-center gap-1"
               >
-                ⚡ Abrir N8n Inspector
+                🤖 Visualizar Orquestração
               </button>
             </div>
             <p className="mt-1 text-ink-600 dark:text-ink-400">

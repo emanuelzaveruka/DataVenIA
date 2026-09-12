@@ -168,6 +168,9 @@ export async function POST(request: Request) {
   const receivedAt = Date.now();
   recorder.record("RECEIVED", "Arquivo Recebido", "COMPLETED", receivedAt, {
     nodeName: "01. Upload de Documento",
+    agentName: "Agente Ingestão & LGPD",
+    agentRole: "Sub-agente Especialista em Parsing de Documento & Mascaramento PII (HU-01 / HU-05)",
+    agentIcon: "🛡️",
     input: { fileName: file.name, fileSize: file.size, mimeType: file.type },
     output: { status: "RECEIVED", sizeBytes: file.size },
     logs: [`[INFO] Arquivo ${file.name} carregado na API com sucesso.`],
@@ -180,6 +183,9 @@ export async function POST(request: Request) {
   if (validation.isError) {
     recorder.record("VALIDATING", "Validação de Arquivo", "FAILED", tVal, {
       nodeName: "02. Validação do Formato",
+      agentName: "Agente Ingestão & LGPD",
+      agentRole: "Sub-agente Especialista em Parsing de Documento & Mascaramento PII (HU-02)",
+      agentIcon: "🛡️",
       input: { fileName: file.name, bytes: buffer.length },
       error: { code: validation.error.code, message: validation.error.userMessage || validation.error.description || validation.error.code, description: validation.error.description },
       logs: [`[ERROR] Falha ao validar extensão ou formato: ${validation.error.description}`],
@@ -188,6 +194,9 @@ export async function POST(request: Request) {
   }
   recorder.record("VALIDATING", "Validação de Arquivo", "COMPLETED", tVal, {
     nodeName: "02. Validação do Formato",
+    agentName: "Agente Ingestão & LGPD",
+    agentRole: "Sub-agente Especialista em Parsing de Documento & Mascaramento PII (HU-02)",
+    agentIcon: "🛡️",
     input: { fileName: file.name, bytes: buffer.length },
     output: validation.data,
     logs: [`[INFO] Extensão e MIME Type ${validation.data.mimeType} aprovados.`],
@@ -200,6 +209,9 @@ export async function POST(request: Request) {
   if (parsed.isError) {
     recorder.record("PARSING", "Extração de Texto", "FAILED", tParse, {
       nodeName: "03. Parsing de PDF/DOCX",
+      agentName: "Agente Ingestão & LGPD",
+      agentRole: "Sub-agente Especialista em Parsing de Documento & Mascaramento PII (HU-03)",
+      agentIcon: "🛡️",
       input: { fileName: file.name, mimeType: validation.data.mimeType },
       error: { code: parsed.error.code, message: parsed.error.userMessage || parsed.error.description || parsed.error.code, description: parsed.error.description },
       logs: [`[ERROR] Falha na extração de texto: ${parsed.error.description}`],
@@ -208,6 +220,9 @@ export async function POST(request: Request) {
   }
   recorder.record("PARSING", "Extração de Texto", "COMPLETED", tParse, {
     nodeName: "03. Parsing de PDF/DOCX",
+    agentName: "Agente Ingestão & LGPD",
+    agentRole: "Sub-agente Especialista em Parsing de Documento & Mascaramento PII (HU-03)",
+    agentIcon: "🛡️",
     input: { fileName: file.name, mimeType: validation.data.mimeType },
     output: { documentId: parsed.data.documentId, metadata: parsed.data.metadata, charCount: parsed.data.text.length },
     logs: [`[INFO] Texto extraído (${parsed.data.text.length} caracteres, ${parsed.data.metadata.pageCount} páginas).`],
@@ -220,6 +235,9 @@ export async function POST(request: Request) {
   if (sanitized.isError) {
     recorder.record("SANITIZING", "Sanitização PII (HU-05)", "FAILED", tSan, {
       nodeName: "04. Sanitização LGPD/PII",
+      agentName: "Agente Ingestão & LGPD",
+      agentRole: "Sub-agente Especialista em Parsing de Documento & Mascaramento PII (HU-05)",
+      agentIcon: "🛡️",
       input: { documentId: parsed.data.documentId },
       error: { code: sanitized.error.code, message: sanitized.error.userMessage || sanitized.error.description || sanitized.error.code, description: sanitized.error.description },
       logs: [`[ERROR] Falha na sanitização PII: ${sanitized.error.description}`],
@@ -228,6 +246,9 @@ export async function POST(request: Request) {
   }
   recorder.record("SANITIZING", "Sanitização PII (HU-05)", "COMPLETED", tSan, {
     nodeName: "04. Sanitização LGPD/PII",
+    agentName: "Agente Ingestão & LGPD",
+    agentRole: "Sub-agente Especialista em Parsing de Documento & Mascaramento PII (HU-05)",
+    agentIcon: "🛡️",
     input: { rawLength: parsed.data.text.length },
     output: { redactionsCount: sanitized.data.redactions.length, sanitizedLength: sanitized.data.sanitizedText.length },
     logs: [`[INFO] ${sanitized.data.redactions.length} dados pessoais mascarados/sanitizados.`],
@@ -268,6 +289,9 @@ export async function POST(request: Request) {
   if (caseAnalysis.isError) {
     recorder.record("DOCUMENT_ANALYSIS", "Análise de Caso (LLM)", "FAILED", tCase, {
       nodeName: "05. Case Understanding (Fatos/Teses)",
+      agentName: "Agente Case Understanding",
+      agentRole: "Sub-agente Especialista em Mapeamento de Fatos & Teses Jurídicas (HU-07 / HU-08)",
+      agentIcon: "🧠",
       input: { sanitizedLength: sanitized.data.sanitizedText.length },
       error: { code: caseAnalysis.error.code, message: caseAnalysis.error.userMessage || caseAnalysis.error.description || caseAnalysis.error.code, description: caseAnalysis.error.description },
     });
@@ -275,6 +299,9 @@ export async function POST(request: Request) {
   }
   recorder.record("DOCUMENT_ANALYSIS", "Análise de Caso (LLM)", "COMPLETED", tCase, {
     nodeName: "05. Case Understanding (Fatos/Teses)",
+    agentName: "Agente Case Understanding",
+    agentRole: "Sub-agente Especialista em Mapeamento de Fatos & Teses Jurídicas (HU-07 / HU-08)",
+    agentIcon: "🧠",
     input: { sanitizedLength: sanitized.data.sanitizedText.length },
     output: { legalIssuesCount: caseAnalysis.data.legalIssues.length, factsCount: caseAnalysis.data.facts.length },
     logs: [`[INFO] Análise do caso concluída com ${caseAnalysis.data.legalIssues.length} teses jurídicas mapeadas.`],
@@ -302,6 +329,9 @@ export async function POST(request: Request) {
   if (queryPlan.isError) {
     recorder.record("QUERY_GENERATION", "Geração de Queries", "FAILED", tQueries, {
       nodeName: "06. Query Builder (LLM)",
+      agentName: "Agente Query Builder",
+      agentRole: "Sub-agente Especialista em Estratégia de Busca Jurídica (HU-11)",
+      agentIcon: "🎯",
       input: { legalIssuesCount: caseAnalysis.data.legalIssues.length },
       error: { code: queryPlan.error.code, message: queryPlan.error.userMessage || queryPlan.error.description || queryPlan.error.code, description: queryPlan.error.description },
     });
@@ -309,6 +339,9 @@ export async function POST(request: Request) {
   }
   recorder.record("QUERY_GENERATION", "Geração de Queries", "COMPLETED", tQueries, {
     nodeName: "06. Query Builder (LLM)",
+    agentName: "Agente Query Builder",
+    agentRole: "Sub-agente Especialista em Estratégia de Busca Jurídica (HU-11)",
+    agentIcon: "🎯",
     input: { legalIssuesCount: caseAnalysis.data.legalIssues.length },
     output: { totalQueries: queryPlan.data.queries.length, queries: queryPlan.data.queries },
     logs: [`[INFO] ${queryPlan.data.queries.length} pesquisas jurídicas personalizadas foram criadas.`],
@@ -333,6 +366,9 @@ export async function POST(request: Request) {
     if (searchResult.isError) {
       recorder.record("SEARCH", "Busca Jurisprudencial", "FAILED", tSearch, {
         nodeName: "07. Busca & Pre-Ranking (TJPR)",
+        agentName: "Agente TJPR Crawler & Pre-Rank",
+        agentRole: "Sub-agente de Busca & Seleção de Precedentes (HU-12 / HU-15 / HU-16)",
+        agentIcon: "🔍",
         input: { query: searchQuery.query },
         error: { code: searchResult.error.code, message: searchResult.error.userMessage || searchResult.error.description || searchResult.error.code },
       });
@@ -363,6 +399,9 @@ export async function POST(request: Request) {
   if (selected.isError) {
     recorder.record("SEARCH", "Seleção de Julgados", "FAILED", tSearch, {
       nodeName: "07. Busca & Pre-Ranking (TJPR)",
+      agentName: "Agente TJPR Crawler & Pre-Rank",
+      agentRole: "Sub-agente de Busca & Seleção de Precedentes (HU-12 / HU-15 / HU-16)",
+      agentIcon: "🔍",
       input: { totalFound: uniqueItems.length },
       error: { code: selected.error.code, message: selected.error.userMessage || selected.error.description || selected.error.code },
     });
@@ -371,6 +410,9 @@ export async function POST(request: Request) {
 
   recorder.record("SEARCH", "Busca Jurisprudencial", "COMPLETED", tSearch, {
     nodeName: "07. Busca & Pre-Ranking (TJPR)",
+    agentName: "Agente TJPR Crawler & Pre-Rank",
+    agentRole: "Sub-agente de Busca & Seleção de Precedentes (HU-12 / HU-15 / HU-16)",
+    agentIcon: "🔍",
     input: { totalQueries: queryPlan.data.queries.length },
     output: { totalFound: uniqueItems.length, selectedCount: selected.data.length },
     logs: [`[INFO] ${uniqueItems.length} acórdãos encontrados; top ${selected.data.length} selecionados.`],
@@ -392,6 +434,9 @@ export async function POST(request: Request) {
   if (scratchpadBatch.isError) {
     recorder.record("SCRATCHPAD_GENERATION", "Geração de Scratchpads", "FAILED", tScratch, {
       nodeName: "08. Extraction Scratchpads",
+      agentName: "Pool de Agentes Scratchpad",
+      agentRole: "Sub-agentes Paralelos de Análise de Acórdão (HU-17 / HU-18)",
+      agentIcon: "⚡",
       input: { count: selected.data.length },
       error: { code: scratchpadBatch.error.code, message: scratchpadBatch.error.userMessage || scratchpadBatch.error.description || scratchpadBatch.error.code },
     });
@@ -402,6 +447,9 @@ export async function POST(request: Request) {
   if (validScratchpads.length < MIN_VALID_SCRATCHPADS) {
     recorder.record("SCRATCHPAD_GENERATION", "Geração de Scratchpads", "FAILED", tScratch, {
       nodeName: "08. Extraction Scratchpads",
+      agentName: "Pool de Agentes Scratchpad",
+      agentRole: "Sub-agentes Paralelos de Análise de Acórdão (HU-17 / HU-18)",
+      agentIcon: "⚡",
       input: { count: selected.data.length },
       error: { code: "INSUFFICIENT_VALID_SCRATCHPADS", message: `Apenas ${validScratchpads.length} scratchpads válidos.` },
     });
@@ -410,6 +458,15 @@ export async function POST(request: Request) {
 
   recorder.record("SCRATCHPAD_GENERATION", "Geração de Scratchpads", "COMPLETED", tScratch, {
     nodeName: "08. Extraction Scratchpads",
+    agentName: "Pool de Agentes Scratchpad",
+    agentRole: "Sub-agentes Paralelos de Análise de Acórdão (HU-17 / HU-18)",
+    agentIcon: "⚡",
+    subTasks: validScratchpads.map((s, idx) => ({
+      id: `scratchpad-worker-${idx + 1}`,
+      name: `Worker ${idx + 1}: ${s.source.processNumber || s.source.sourceId}`,
+      status: "COMPLETED",
+      output: { court: s.source.court, processNumber: s.source.processNumber, judge: s.source.judge, summary: s.caseSummary.slice(0, 100) },
+    })),
     input: { selectedCount: selected.data.length },
     output: { validCount: validScratchpads.length, status: scratchpadBatch.data.status },
     logs: [`[INFO] ${validScratchpads.length} scratchpads gerados e validados por proposição.`],
@@ -429,6 +486,9 @@ export async function POST(request: Request) {
   if (crossFile.isError) {
     recorder.record("CROSS_FILE_ANALYSIS", "Análise Cruzada", "FAILED", tCross, {
       nodeName: "09. Cross-File Analysis",
+      agentName: "Agente Cross-File Analyst",
+      agentRole: "Sub-agente Especialista em Análise Cruzada (HU-21 / HU-22)",
+      agentIcon: "⚖️",
       input: { scratchpadsCount: scratchpadBatch.data.scratchpads.length },
       error: { code: crossFile.error.code, message: crossFile.error.userMessage || crossFile.error.description || crossFile.error.code },
     });
@@ -437,6 +497,9 @@ export async function POST(request: Request) {
 
   recorder.record("CROSS_FILE_ANALYSIS", "Análise Cruzada", "COMPLETED", tCross, {
     nodeName: "09. Cross-File Analysis",
+    agentName: "Agente Cross-File Analyst",
+    agentRole: "Sub-agente Especialista em Análise Cruzada (HU-21 / HU-22)",
+    agentIcon: "⚖️",
     input: { scratchpadsCount: scratchpadBatch.data.scratchpads.length },
     output: { analysesCount: crossFile.data.analyses.length },
     logs: [`[INFO] Análise cruzada das teses e precedentes finalizada com sucesso.`],
@@ -466,6 +529,9 @@ export async function POST(request: Request) {
   if (evidence.isError) {
     recorder.record("EVIDENCE_VERIFICATION", "Verificação de Evidências", "FAILED", tEv, {
       nodeName: "10. Evidence Verification",
+      agentName: "Agente Audit Evidence Verifier",
+      agentRole: "Sub-agente Especialista em Verificação Anti-alucinação (HU-24 / HU-25)",
+      agentIcon: "🕵️",
       input: { analysesCount: crossFile.data.analyses.length },
       error: { code: evidence.error.code, message: evidence.error.userMessage || evidence.error.description || evidence.error.code },
     });
@@ -474,6 +540,9 @@ export async function POST(request: Request) {
 
   recorder.record("EVIDENCE_VERIFICATION", "Verificação de Evidências", "COMPLETED", tEv, {
     nodeName: "10. Evidence Verification",
+    agentName: "Agente Audit Evidence Verifier",
+    agentRole: "Sub-agente Especialista em Verificação Anti-alucinação (HU-24 / HU-25)",
+    agentIcon: "🕵️",
     input: { analysesCount: crossFile.data.analyses.length },
     output: { verifiedCount: evidence.data.verifiedCount },
     logs: [`[INFO] ${evidence.data.verifiedCount} citações checadas e auditadas anti-alucinação.`],
@@ -509,6 +578,9 @@ export async function POST(request: Request) {
   if (report.isError) {
     recorder.record("REPORT_GENERATION", "Geração de Relatório", "FAILED", tRep, {
       nodeName: "11. Consolidação do Relatório",
+      agentName: "Agente Sintetizador de Relatório",
+      agentRole: "Sub-agente Consolidador de Relatório Estruturado (HU-26 / HU-27)",
+      agentIcon: "📄",
       error: { code: report.error.code, message: report.error.userMessage || report.error.description || report.error.code },
     });
     return failWith(report.error);
@@ -516,6 +588,9 @@ export async function POST(request: Request) {
 
   recorder.record("REPORT_GENERATION", "Geração de Relatório", "COMPLETED", tRep, {
     nodeName: "11. Consolidação do Relatório",
+    agentName: "Agente Sintetizador de Relatório",
+    agentRole: "Sub-agente Consolidador de Relatório Estruturado (HU-26 / HU-27)",
+    agentIcon: "📄",
     output: { reportId: report.data.reportId, status: "READY" },
     logs: [`[INFO] Relatório final consolidado e pronto para visualização.`],
   });
