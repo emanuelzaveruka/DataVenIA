@@ -201,7 +201,7 @@ export async function POST(request: Request) {
     recorder.record("PARSING", "Extração de Texto", "FAILED", tParse, {
       nodeName: "03. Parsing de PDF/DOCX",
       input: { fileName: file.name, mimeType: validation.data.mimeType },
-      error: { code: parsed.error.code, message: parsed.error.userMessage, description: parsed.error.description },
+      error: { code: parsed.error.code, message: parsed.error.userMessage || parsed.error.description || parsed.error.code, description: parsed.error.description },
       logs: [`[ERROR] Falha na extração de texto: ${parsed.error.description}`],
     });
     return failWith(parsed.error);
@@ -221,7 +221,7 @@ export async function POST(request: Request) {
     recorder.record("SANITIZING", "Sanitização PII (HU-05)", "FAILED", tSan, {
       nodeName: "04. Sanitização LGPD/PII",
       input: { documentId: parsed.data.documentId },
-      error: { code: sanitized.error.code, message: sanitized.error.userMessage, description: sanitized.error.description },
+      error: { code: sanitized.error.code, message: sanitized.error.userMessage || sanitized.error.description || sanitized.error.code, description: sanitized.error.description },
       logs: [`[ERROR] Falha na sanitização PII: ${sanitized.error.description}`],
     });
     return failWith(sanitized.error);
@@ -303,7 +303,7 @@ export async function POST(request: Request) {
     recorder.record("QUERY_GENERATION", "Geração de Queries", "FAILED", tQueries, {
       nodeName: "06. Query Builder (LLM)",
       input: { legalIssuesCount: caseAnalysis.data.legalIssues.length },
-      error: { code: queryPlan.error.code, message: queryPlan.error.userMessage, description: queryPlan.error.description },
+      error: { code: queryPlan.error.code, message: queryPlan.error.userMessage || queryPlan.error.description || queryPlan.error.code, description: queryPlan.error.description },
     });
     return failWith(queryPlan.error);
   }
@@ -333,7 +333,7 @@ export async function POST(request: Request) {
       recorder.record("SEARCH", "Busca Jurisprudencial", "FAILED", tSearch, {
         nodeName: "07. Busca & Pre-Ranking (TJPR)",
         input: { query: searchQuery.query },
-        error: { code: searchResult.error.code, message: searchResult.error.userMessage },
+        error: { code: searchResult.error.code, message: searchResult.error.userMessage || searchResult.error.description || searchResult.error.code },
       });
       return failWith(searchResult.error);
     }
@@ -363,7 +363,7 @@ export async function POST(request: Request) {
     recorder.record("SEARCH", "Seleção de Julgados", "FAILED", tSearch, {
       nodeName: "07. Busca & Pre-Ranking (TJPR)",
       input: { totalFound: uniqueItems.length },
-      error: { code: selected.error.code, message: selected.error.userMessage },
+      error: { code: selected.error.code, message: selected.error.userMessage || selected.error.description || selected.error.code },
     });
     return failWith(selected.error);
   }
@@ -392,7 +392,7 @@ export async function POST(request: Request) {
     recorder.record("SCRATCHPAD_GENERATION", "Geração de Scratchpads", "FAILED", tScratch, {
       nodeName: "08. Extraction Scratchpads",
       input: { count: selected.data.length },
-      error: { code: scratchpadBatch.error.code, message: scratchpadBatch.error.userMessage },
+      error: { code: scratchpadBatch.error.code, message: scratchpadBatch.error.userMessage || scratchpadBatch.error.description || scratchpadBatch.error.code },
     });
     return failWith(scratchpadBatch.error);
   }
@@ -429,7 +429,7 @@ export async function POST(request: Request) {
     recorder.record("CROSS_FILE_ANALYSIS", "Análise Cruzada", "FAILED", tCross, {
       nodeName: "09. Cross-File Analysis",
       input: { scratchpadsCount: scratchpadBatch.data.scratchpads.length },
-      error: { code: crossFile.error.code, message: crossFile.error.userMessage },
+      error: { code: crossFile.error.code, message: crossFile.error.userMessage || crossFile.error.description || crossFile.error.code },
     });
     return failWith(crossFile.error);
   }
@@ -466,7 +466,7 @@ export async function POST(request: Request) {
     recorder.record("EVIDENCE_VERIFICATION", "Verificação de Evidências", "FAILED", tEv, {
       nodeName: "10. Evidence Verification",
       input: { analysesCount: crossFile.data.analyses.length },
-      error: { code: evidence.error.code, message: evidence.error.userMessage },
+      error: { code: evidence.error.code, message: evidence.error.userMessage || evidence.error.description || evidence.error.code },
     });
     return failWith(evidence.error);
   }
@@ -508,7 +508,7 @@ export async function POST(request: Request) {
   if (report.isError) {
     recorder.record("REPORT_GENERATION", "Geração de Relatório", "FAILED", tRep, {
       nodeName: "11. Consolidação do Relatório",
-      error: { code: report.error.code, message: report.error.userMessage },
+      error: { code: report.error.code, message: report.error.userMessage || report.error.description || report.error.code },
     });
     return failWith(report.error);
   }

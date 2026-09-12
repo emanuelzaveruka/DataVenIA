@@ -245,7 +245,7 @@ export function N8nExecutionView({ isOpen, onClose, events, traceId, runId }: N8
                       {selectedNode.error.description && (
                         <p className="text-xs text-rose-200">{String(selectedNode.error.description)}</p>
                       )}
-                      {selectedNode.error.details && (
+                      {Boolean(selectedNode.error.details) && (
                         <pre className="mt-2 p-2 bg-slate-950/80 rounded text-[11px] overflow-x-auto">
                           {JSON.stringify(selectedNode.error.details, null, 2)}
                         </pre>
