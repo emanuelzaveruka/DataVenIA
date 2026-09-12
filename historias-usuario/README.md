@@ -1,4 +1,4 @@
-# JurisFlow — Histórias de Usuário (HUs)
+# Data VênIA — Histórias de Usuário (HUs)
 
 > Fonte de verdade de produto/arquitetura: `contexto-geral.md`. Este documento traduz aquele
 > contexto em histórias de usuário implementáveis, com regras de negócio e validações. Onde uma

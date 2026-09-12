@@ -1,8 +1,8 @@
 import { createInMemoryRepository } from "./in-memory-repository";
 import { createSupabaseRepository } from "./supabase-repository";
-import type { JurisFlowRepository } from "./repository";
+import type { DataVeniaRepository } from "./repository";
 
-let cached: JurisFlowRepository | undefined;
+let cached: DataVeniaRepository | undefined;
 
 /**
  * Único ponto de seleção de storage (mirror de `getLlmProvider` e `getJurisprudenceProvider`).
@@ -13,7 +13,7 @@ let cached: JurisFlowRepository | undefined;
  * A degradação é explícita, nunca silenciosa: variável pela metade (só uma das duas) é erro de
  * configuração, não motivo para escorregar para memória sem avisar.
  */
-export function getRepository(env: NodeJS.ProcessEnv = process.env): JurisFlowRepository {
+export function getRepository(env: NodeJS.ProcessEnv = process.env): DataVeniaRepository {
   const url = env.SUPABASE_URL;
   const serviceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY;
 

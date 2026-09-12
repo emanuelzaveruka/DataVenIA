@@ -14,9 +14,9 @@ import {
   searchRecord,
   toolExecutionLog,
 } from "./fixtures";
-import type { JurisFlowRepository } from "../repository";
+import type { DataVeniaRepository } from "../repository";
 
-async function seedFullRun(): Promise<JurisFlowRepository> {
+async function seedFullRun(): Promise<DataVeniaRepository> {
   const repository = createInMemoryRepository();
 
   await repository.createRun(runRecord());

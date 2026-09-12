@@ -28,7 +28,7 @@ import { MIN_VALID_SCRATCHPADS } from "../../../lib/config/limits";
 import { createAppError, type AppError } from "../../../lib/errors/app-error";
 import type { ToolResult } from "../../../lib/errors/tool-result";
 import type { JurisprudenceSearchItem } from "../../../lib/schemas/search.schema";
-import type { JurisFlowRepository } from "../../../lib/persistence/repository";
+import type { DataVeniaRepository } from "../../../lib/persistence/repository";
 
 export const runtime = "nodejs";
 
@@ -87,7 +87,7 @@ function dedupeSearchItems(items: JurisprudenceSearchItem[]): JurisprudenceSearc
 
 export async function POST(request: Request) {
   const recorder = createStageRecorder();
-  let repository: JurisFlowRepository;
+  let repository: DataVeniaRepository;
   try {
     repository = getRepository();
   } catch (cause) {

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { toolSuccess, type ToolResult } from "../errors/tool-result";
 import type { JurisprudenceQuery, JurisprudenceSearchResult, RawDecision } from "../schemas/search.schema";
 import type { JurisprudenceDecisionRecord } from "../schemas/persistence.schema";
-import type { JurisFlowRepository } from "../persistence/repository";
+import type { DataVeniaRepository } from "../persistence/repository";
 import type { JurisprudenceProvider } from "./jurisprudence-provider";
 
 /**
@@ -63,7 +63,7 @@ function toDecision(record: JurisprudenceDecisionRecord): RawDecision {
  */
 export function createCachedJurisprudenceProvider(
   inner: JurisprudenceProvider,
-  repository: JurisFlowRepository,
+  repository: DataVeniaRepository,
 ): CachedJurisprudenceProvider {
   return {
     name: `cached:${inner.name}`,

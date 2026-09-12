@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "JurisFlow",
+  title: "Data VênIA",
   description:
     "Pesquisa de jurisprudência do TJPR com relatório sourced e verificável.",
 };

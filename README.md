@@ -1,4 +1,4 @@
-# JurisFlow
+# Data VênIA
 
 Assistente de pesquisa de jurisprudência: recebe um documento jurídico, extrai fatos e questões
 (Case Understanding), busca decisões públicas do TJPR, analisa cada decisão isoladamente
@@ -187,7 +187,7 @@ para demonstração.
 - `lib/llm/` — abstração de provider de LLM (Anthropic/OpenAI via fetch puro, sem SDK) e
   `generateStructuredWithRetry` (saída estruturada validada, com retry que devolve ao modelo o
   erro da tentativa anterior).
-- `lib/persistence/` — `JurisFlowRepository` e suas duas implementações (memória e Supabase via
+- `lib/persistence/` — `DataVeniaRepository` e suas duas implementações (memória e Supabase via
   PostgREST, também sem SDK), cache de decisão e chave de idempotência.
 - `lib/observability/` — `ToolExecutionLog` e progresso etapa a etapa (§11.9).
 - `lib/errors/`, `lib/workflow/`, `lib/hooks/`, `lib/concurrency/` — primitivos de resiliência

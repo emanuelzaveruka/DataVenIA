@@ -1,4 +1,4 @@
--- JurisFlow — modelo de dados (contexto-geral.md §11.8, HU-34).
+-- Data VênIA — modelo de dados (contexto-geral.md §11.8, HU-34).
 --
 -- Convenções desta migration, e o porquê de cada uma:
 --

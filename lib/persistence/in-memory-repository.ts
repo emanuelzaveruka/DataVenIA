@@ -13,7 +13,7 @@ import type {
   UploadedDocumentRecord,
   VerifiedEvidenceRecord,
 } from "../schemas/persistence.schema";
-import type { AnalysisRunSnapshot, JurisFlowRepository } from "./repository";
+import type { AnalysisRunSnapshot, DataVeniaRepository } from "./repository";
 
 function decisionKey(provider: string, sourceId: string): string {
   return `${provider}:${sourceId}`;
@@ -35,7 +35,7 @@ function runNotFound(runId: string, operation: string) {
 }
 
 /**
- * Implementação em memória do `JurisFlowRepository`. Não é andaime descartável: é o que sustenta o
+ * Implementação em memória do `DataVeniaRepository`. Não é andaime descartável: é o que sustenta o
  * critério de aceite 16 (aplicação funciona em modo fixture, sem conectividade) e o que permite
  * testar idempotência e observabilidade sem subir banco. O Postgres de §11.8 é a *outra*
  * implementação da mesma interface, não a substituição desta.
@@ -43,7 +43,7 @@ function runNotFound(runId: string, operation: string) {
  * Vale só enquanto o processo vive — por isso `getRepository()` só a escolhe quando não há Supabase
  * configurado, e por isso HU-33 (cache entre execuções) só tem efeito real com o storage persistente.
  */
-export function createInMemoryRepository(): JurisFlowRepository {
+export function createInMemoryRepository(): DataVeniaRepository {
   const runs = new Map<string, AnalysisRunRecord>();
   const documents = new Map<string, UploadedDocumentRecord>();
   const caseAnalyses = new Map<string, CaseAnalysisRecord>();

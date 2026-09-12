@@ -2,7 +2,7 @@ import type { PipelineVersions } from "../config/versions";
 import type { DecisionScratchpad } from "../schemas/scratchpad.schema";
 import type { DecisionScratchpadRecord } from "../schemas/persistence.schema";
 import { buildIdempotencyKey } from "./idempotency";
-import type { JurisFlowRepository } from "./repository";
+import type { DataVeniaRepository } from "./repository";
 
 /**
  * Reaproveitamento de Scratchpad (HU-33). Fica atrás de uma interface mínima porque o serviço da
@@ -28,7 +28,7 @@ export const NO_SCRATCHPAD_CACHE: ScratchpadCache = {
 };
 
 export interface RepositoryScratchpadCacheConfig {
-  repository: JurisFlowRepository;
+  repository: DataVeniaRepository;
   runId: string;
   versions: PipelineVersions;
 }

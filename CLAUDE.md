@@ -8,7 +8,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 
-# JurisFlow — contexto e ordem de implementação
+# Data VênIA — contexto e ordem de implementação
 
 Fonte de verdade do produto: `contexto-geral.md` (arquitetura/decisões) e `historias-usuario/` (38 HUs
 em 12 épicos, com matriz de rastreabilidade para os critérios de aceite do §12 em
@@ -160,7 +160,7 @@ jurisprudência roda em modo fixture.
   `supabase/migrations/0001_initial_schema.sql` (11 tabelas, JSONB para os payloads de domínio,
   instruções em `supabase/README.md`), contratos em `lib/schemas/persistence.schema.ts`.
   **Decisão central**: storage entra pela mesma porta que LLM e jurisprudência —
-  `JurisFlowRepository` (`lib/persistence/repository.ts`) com duas implementações,
+  `DataVeniaRepository` (`lib/persistence/repository.ts`) com duas implementações,
   `in-memory-repository.ts` e `supabase-repository.ts`, escolhidas por `getRepository()`. O
   repositório em memória **não é andaime**: é o que mantém o critério de aceite 16 (aplicação
   completa sem conectividade) valendo depois da Fase 8, e por isso a ausência de `SUPABASE_URL` +

@@ -40,7 +40,7 @@ export interface AnalysisRunSnapshot {
  * Todos os métodos devolvem `ToolResult` (§11.3): falha de persistência é erro do contrato único,
  * classificado como qualquer outro, nunca uma exceção solta atravessando o pipeline.
  */
-export interface JurisFlowRepository {
+export interface DataVeniaRepository {
   readonly name: string;
 
   createRun(run: AnalysisRunRecord): Promise<ToolResult<AnalysisRunRecord>>;

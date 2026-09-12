@@ -1,11 +1,11 @@
-# JurisFlow — Contexto Técnico Geral (Consolidado)
+# Data VênIA — Contexto Técnico Geral (Consolidado)
 
 ## 0. Nota de proveniência
 
 Este arquivo consolida dois documentos de planejamento anteriores:
 
 - `contexto1.md` — especificação técnica ampla do "Motor de Análise Jurisprudencial com Scratchpad Files" (arquitetura, pipeline, resiliência, persistência).
-- `contexto2.md` — escopo de produto do "JurisFlow" para o Hackathon da Cidadania OAB-PR 2026 (stack, investigação da fonte TJPR, time, pitch).
+- `contexto2.md` — escopo de produto do "Data VênIA" para o Hackathon da Cidadania OAB-PR 2026 (stack, investigação da fonte TJPR, time, pitch).
 
 Os dois arquivos originais permanecem no repositório e não devem ser apagados. **A partir de agora, este arquivo (`contexto-geral.md`) é a fonte de verdade** para a implementação. Onde os dois documentos originais divergiam, as decisões abaixo foram tomadas explicitamente (não por omissão):
 
@@ -18,7 +18,7 @@ Os dois arquivos originais permanecem no repositório e não devem ser apagados.
 
 ## 1. Visão geral do produto
 
-**JurisFlow** é um assistente que recebe um documento jurídico enviado pelo advogado e devolve um relatório jurisprudencial estruturado, fundamentado e rastreável sobre o TJPR: quais decisões fortalecem a tese, quais contrariam, e quais são indeterminadas — sempre com link para a fonte oficial.
+**Data VênIA** é um assistente que recebe um documento jurídico enviado pelo advogado e devolve um relatório jurisprudencial estruturado, fundamentado e rastreável sobre o TJPR: quais decisões fortalecem a tese, quais contrariam, e quais são indeterminadas — sempre com link para a fonte oficial.
 
 Ele apoia a preparação de recursos e petições. **Não promete resultado processual, não substitui análise jurídica e não recomenda peça pronta sem revisão humana.**
 
@@ -365,7 +365,7 @@ Stack: **Next.js + TypeScript + Tailwind CSS**, App Router e route handlers, em 
 
 ```mermaid
 flowchart TD
-  U[Upload do documento] --> A[API do JurisFlow]
+  U[Upload do documento] --> A[API do Data VênIA]
   A --> DP[Document Parser]
   DP --> CU[Case Understanding]
   CU --> QG[Query Generator]
@@ -768,7 +768,7 @@ O sistema deve permitir visualizar o progresso etapa a etapa (documento processa
 
 ### Direção de pitch
 
-"O advogado não precisa de mais um chat que responde com segurança demais. Ele precisa encontrar rapidamente o que aquele órgão julgador já decidiu, inclusive o que derruba a própria tese. O JurisFlow organiza essa evidência pública, mostra a fonte e devolve a decisão ao profissional."
+"O advogado não precisa de mais um chat que responde com segurança demais. Ele precisa encontrar rapidamente o que aquele órgão julgador já decidiu, inclusive o que derruba a própria tese. O Data VênIA organiza essa evidência pública, mostra a fonte e devolve a decisão ao profissional."
 
 Para o pitch de cinco minutos, demonstrar o caminho **documento enviado → pesquisa delimitada → julgados favoráveis e contrários → fonte oficial → decisão humana**. Enfatizar benefício social, transparência, acesso aberto, auditabilidade e suporte prático à advocacia, em conformidade com a modalidade Inovação Aberta e Cidadania.
 

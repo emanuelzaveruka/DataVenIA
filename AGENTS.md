@@ -8,7 +8,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 
-# JurisFlow — contexto e ordem de implementação
+# Data VênIA — contexto e ordem de implementação
 
 Fonte de verdade do produto: `contexto-geral.md` (arquitetura/decisões) e `historias-usuario/` (38 HUs
 em 12 épicos, com matriz de rastreabilidade para os critérios de aceite do §12 em

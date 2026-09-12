@@ -5,10 +5,10 @@ Todas as cores abaixo foram **amostradas do arquivo**, não estimadas, e todos o
 **medidos** pela fórmula WCAG 2.1 — os números estão na tabela, para que ninguém precise confiar em
 "parece acessível".
 
-> **Pendência de nomenclatura.** O logo diz **Data VênIA**; `package.json`, `README.md` e
-> `app/layout.tsx` dizem **JurisFlow**. Este documento adota Data VênIA como marca (é o que existe
-> em forma visual e dá nome ao repositório). Alinhar o nome no código é uma decisão de produto
-> ainda em aberto — ver [Pendências](#pendências).
+> **Nomenclatura.** O produto se chama **Data VênIA** em todo texto visível ao usuário e em toda a
+> documentação. Em identificador de código e no `name` do `package.json` a forma é **`DataVenia`**
+> / **`datavenia`** — sem acento e sem espaço, que não cabem nesses lugares (ex.: a interface
+> `DataVeniaRepository`). O nome anterior, JurisFlow, foi substituído em 2026-09-12.
 
 ## 1. O nome
 
@@ -248,13 +248,11 @@ operacional, seção 5), mas *concluída* e *pendente* se distinguiam só pela c
 
 ## Pendências
 
-1. **Nome do produto** — Data VênIA (logo, repo) vs JurisFlow (`package.json`, `README.md`,
-   `app/layout.tsx`, `<title>`). Decisão de produto, não de design. **Adiada por decisão do
-   usuário (2026-09-12): o código segue em JurisFlow por ora.**
-2. **Logo em SVG** — o JPEG de fundo chapado não serve para a interface. Enquanto não existir, o
+1. **Logo em SVG** — o JPEG de fundo chapado não serve para a interface. Enquanto não existir, o
    logo não entra na UI: hoje o cabeçalho é texto.
-3. **Tipografia não aplicada** — Poppins/Inter estão especificados (seção 7) mas ainda não
+2. **Tipografia não aplicada** — Poppins/Inter estão especificados (seção 7) mas ainda não
    carregados via `next/font/google` em `app/layout.tsx`. A UI usa a fonte padrão do sistema.
-4. **Fonte do wordmark** — Poppins é aproximação; confirmar com quem desenhou o logo.
+3. **Fonte do wordmark** — Poppins é aproximação; confirmar com quem desenhou o logo.
 
 ~~Disclaimer fora do âmbar~~ — feito, seção 9.
+~~Nome do produto~~ — feito: JurisFlow → Data VênIA em código, páginas e documentação.

@@ -15,7 +15,7 @@ import {
   UploadedDocumentRecordSchema,
   VerifiedEvidenceRecordSchema,
 } from "../schemas/persistence.schema";
-import type { AnalysisRunSnapshot, JurisFlowRepository } from "./repository";
+import type { AnalysisRunSnapshot, DataVeniaRepository } from "./repository";
 import { fromRow, toRow } from "./row-mapping";
 
 export interface SupabaseRepositoryConfig {
@@ -59,7 +59,7 @@ function persistenceError(
   });
 }
 
-export function createSupabaseRepository(config: SupabaseRepositoryConfig): JurisFlowRepository {
+export function createSupabaseRepository(config: SupabaseRepositoryConfig): DataVeniaRepository {
   const doFetch = config.fetchImpl ?? fetch;
   const baseUrl = `${config.url.replace(/\/$/, "")}/rest/v1`;
 
