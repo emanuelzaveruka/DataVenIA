@@ -31,3 +31,19 @@ export const MIN_VALID_SCRATCHPADS = 3;
  * é a sugestão inicial", sem fila distribuída).
  */
 export const SCRATCHPAD_CONCURRENCY = 4;
+
+/**
+ * Limiar de aceitação "near-literal" na verificação de evidências (HU-24): fração mínima de tokens
+ * da citação que precisa aparecer, na mesma janela, no texto original reaberto. Abaixo disso a
+ * citação é tratada como não encontrada e o `evidenceId` fica bloqueado para o relatório (HU-25).
+ */
+export const QUOTE_MATCH_MIN_SIMILARITY = 0.9;
+
+/**
+ * Classificação qualitativa de convergência jurisprudencial no relatório final (HU-26/§3.10).
+ * Nenhum destes números é exibido ao usuário — eles só escolhem o rótulo ("alta convergência",
+ * "jurisprudência dividida"), porque §3.10 proíbe expor score interno como probabilidade jurídica.
+ */
+export const MIN_DECISIONS_FOR_CONVERGENCE = 4;
+export const HIGH_CONVERGENCE_RATIO = 0.75;
+export const DIVIDED_CONVERGENCE_MARGIN = 0.15;
