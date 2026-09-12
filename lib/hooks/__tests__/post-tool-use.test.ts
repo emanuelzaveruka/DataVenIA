@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { postToolUse } from "../post-tool-use";
-import { preToolUse } from "../pre-tool-use";
+import { preToolUse, STAGE_TOOL_ALLOWLIST, type ToolName } from "../pre-tool-use";
+import { createGuardedExecution } from "../guarded-execution";
 import { createExecutionRecorder } from "../../observability/execution-recorder";
 import { toolFailure, toolSuccess } from "../../errors/tool-result";
 import { createAppError } from "../../errors/app-error";
+import type { WorkflowStage } from "../../workflow/state-machine";
 
 const failure = toolFailure(
   createAppError({
@@ -24,6 +26,25 @@ describe("preToolUse (HU-31)", () => {
 
   it("allows a tool inside the stage allowlist", () => {
     expect(() => preToolUse({ stage: "SEARCH", toolName: "searchJurisprudence" })).not.toThrow();
+  });
+
+  it("keeps the route-level pipeline tools allowlisted in their execution stage", () => {
+    const expected: Record<ToolName, WorkflowStage> = {
+      validateFile: "DOCUMENT_ANALYSIS",
+      parseDocument: "DOCUMENT_ANALYSIS",
+      sanitizeDocument: "DOCUMENT_ANALYSIS",
+      analyzeCase: "DOCUMENT_ANALYSIS",
+      generateSearchQueries: "QUERY_GENERATION",
+      searchJurisprudence: "SEARCH",
+      generateScratchpads: "SCRATCHPAD_GENERATION",
+      analyzeCrossFile: "CROSS_FILE_ANALYSIS",
+      verifyEvidence: "EVIDENCE_VERIFICATION",
+      buildReport: "REPORT_GENERATION",
+    };
+
+    for (const [toolName, stage] of Object.entries(expected) as [ToolName, WorkflowStage][]) {
+      expect(STAGE_TOOL_ALLOWLIST[stage]).toContain(toolName);
+    }
   });
 });
 
@@ -74,5 +95,50 @@ describe("postToolUse — telemetria (HU-31/HU-35)", () => {
       success,
     );
     expect(postToolUse(success, { stage: "SEARCH", toolName: "fetchDecision" })).toBe(success);
+  });
+});
+
+describe("createGuardedExecution (HU-31)", () => {
+  it("executes and records a tool allowed in the current stage", async () => {
+    const recorder = createExecutionRecorder({ traceId: "trace-1", workflowId: "run-1" });
+    const guarded = createGuardedExecution({
+      getStage: () => "DOCUMENT_ANALYSIS",
+      recorder,
+    });
+    const operation = vi.fn(async () => toolSuccess({ ok: true }));
+
+    const result = await guarded.run("validateFile", operation);
+
+    expect(result.isError).toBe(false);
+    expect(operation).toHaveBeenCalledTimes(1);
+    expect(recorder.logs).toHaveLength(1);
+    expect(recorder.logs[0]).toMatchObject({ toolName: "validateFile", success: true });
+  });
+
+  it("blocks a tool outside the current stage before running the operation", async () => {
+    const recorder = createExecutionRecorder({ traceId: "trace-2", workflowId: "run-2" });
+    const onBlockedTool = vi.fn();
+    const guarded = createGuardedExecution({
+      getStage: () => "REPORT_GENERATION",
+      recorder,
+      onBlockedTool,
+    });
+    const operation = vi.fn(async () => toolSuccess({ leaked: true }));
+
+    const result = await guarded.run("searchJurisprudence", operation);
+
+    expect(result.isError).toBe(true);
+    if (result.isError) {
+      expect(result.error.code).toBe("INVALID_TOOL_FOR_STAGE");
+      expect(result.error.isRetryable).toBe(false);
+    }
+    expect(operation).not.toHaveBeenCalled();
+    expect(onBlockedTool).toHaveBeenCalledTimes(1);
+    expect(recorder.logs).toHaveLength(1);
+    expect(recorder.logs[0]).toMatchObject({
+      toolName: "searchJurisprudence",
+      success: false,
+      errorCode: "INVALID_TOOL_FOR_STAGE",
+    });
   });
 });

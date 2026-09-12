@@ -1,26 +1,38 @@
 import type { JurisprudenceProvider } from "./jurisprudence-provider";
+import { createCircuitBreaker } from "../errors/circuit-breaker";
 import { createFixtureProvider } from "./fixture";
+import { createResilientJurisprudenceProvider } from "./resilient-jurisprudence-provider";
+import { createTjprProvider } from "./tjpr";
+
+const JURISPRUDENCE_PROVIDER_NAMES = ["fixture", "tjpr"] as const;
+type JurisprudenceProviderName = (typeof JURISPRUDENCE_PROVIDER_NAMES)[number];
+
+function isJurisprudenceProviderName(value: string): value is JurisprudenceProviderName {
+  return JURISPRUDENCE_PROVIDER_NAMES.includes(value as JurisprudenceProviderName);
+}
 
 /**
  * Único ponto de seleção de provider de jurisprudência (§5 — mirror de
- * `lib/llm/get-llm-provider.ts`). `TjprProvider` real (`lib/providers/tjpr.ts`) ainda não existe:
- * a validação manual do portal exigida por HU-38 está pendente
- * (`docs/tjpr-portal-validacao.md`), e HU-12 proíbe codificar a integração real antes disso.
- * Enquanto isso o produto roda sempre em `FixtureProvider` (HU-37).
- *
- * Quando `tjpr.ts` existir (Fase 9), a composição esperada aqui passa a ser, de dentro para fora:
- *
- *   const source = createResilientJurisprudenceProvider(
- *     createTjprProvider(), createFixtureProvider(), createCircuitBreaker(),
- *   );
- *   return createCachedJurisprudenceProvider(source, getRepository());
- *
- * O cache (Fase 8, §11.8/HU-33) fica por fora do fallback de propósito: decisão já em cache não
- * deve nem consultar a disponibilidade da fonte. E quem chamar `verifyEvidence` tem de passar
- * `provider.fresh` — servir a decisão pelo cache faria HU-24 comparar o cache com ele mesmo
- * (ver `cached-jurisprudence-provider.ts`). Detalhes e critério de decisão da Fase 9 em
- * `docs/tjpr-portal-validacao.md`.
+ * `lib/llm/get-llm-provider.ts`). A fixture continua sendo o padrão seguro para demo e testes.
+ * Quando `JURISPRUDENCE_PROVIDER=tjpr`, o TJPR real é primário e degrada para fixture com
+ * `metadata.source` explícito, preservando HU-12/HU-14.
  */
-export function getJurisprudenceProvider(): JurisprudenceProvider {
+export function getJurisprudenceProvider(env: Partial<NodeJS.ProcessEnv> = process.env): JurisprudenceProvider {
+  const configuredProvider = (env.JURISPRUDENCE_PROVIDER ?? "fixture").trim().toLowerCase();
+
+  if (!isJurisprudenceProviderName(configuredProvider)) {
+    throw new Error(
+      `JURISPRUDENCE_PROVIDER inválido: ${configuredProvider}. Use um destes: ${JURISPRUDENCE_PROVIDER_NAMES.join(", ")}.`,
+    );
+  }
+
+  if (configuredProvider === "tjpr") {
+    return createResilientJurisprudenceProvider(
+      createTjprProvider({ baseUrl: env.TJPR_BASE_URL }),
+      createFixtureProvider(),
+      createCircuitBreaker(),
+    );
+  }
+
   return createFixtureProvider();
 }

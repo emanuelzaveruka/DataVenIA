@@ -1,30 +1,44 @@
 import type { WorkflowStage } from "../workflow/state-machine";
 
+export const TOOL_NAMES = [
+  "validateFile",
+  "parseDocument",
+  "sanitizeDocument",
+  "analyzeCase",
+  "generateSearchQueries",
+  "searchJurisprudence",
+  "generateScratchpads",
+  "analyzeCrossFile",
+  "verifyEvidence",
+  "buildReport",
+] as const;
+export type ToolName = (typeof TOOL_NAMES)[number];
+
 /**
- * Allowlist de ferramentas por estágio (§11.2). Só os dois estágios citados
- * explicitamente em contexto-geral.md (§7.1) já têm nomes de tool definidos;
- * os demais são preenchidos quando o serviço daquele estágio é implementado.
+ * Allowlist de ferramentas por estágio (§11.2). Os nomes aqui são os mesmos usados pela porta
+ * única de execução; se uma etapa nova chamar uma tool sem adicioná-la aqui, ela será bloqueada
+ * antes de executar.
  */
-export const STAGE_TOOL_ALLOWLIST: Record<WorkflowStage, readonly string[]> = {
-  DOCUMENT_ANALYSIS: ["validateFile", "parseDocument", "sanitizeDocument"],
-  QUERY_GENERATION: [],
-  SEARCH: ["searchJurisprudence", "fetchDecision"],
-  SCRATCHPAD_GENERATION: ["fetchDecision", "generateScratchpad"],
-  CROSS_FILE_ANALYSIS: [],
-  EVIDENCE_VERIFICATION: [],
-  REPORT_GENERATION: ["readScratchpad", "readEvidence", "generateFinalReport"],
+export const STAGE_TOOL_ALLOWLIST: Record<WorkflowStage, readonly ToolName[]> = {
+  DOCUMENT_ANALYSIS: ["validateFile", "parseDocument", "sanitizeDocument", "analyzeCase"],
+  QUERY_GENERATION: ["generateSearchQueries"],
+  SEARCH: ["searchJurisprudence"],
+  SCRATCHPAD_GENERATION: ["generateScratchpads"],
+  CROSS_FILE_ANALYSIS: ["analyzeCrossFile"],
+  EVIDENCE_VERIFICATION: ["verifyEvidence"],
+  REPORT_GENERATION: ["buildReport"],
 };
 
 export interface ToolCallContext {
   stage: WorkflowStage;
-  toolName: string;
+  toolName: ToolName;
 }
 
 export interface PreToolUseError {
   code: "INVALID_STAGE";
   message: string;
   currentStage: WorkflowStage;
-  toolName: string;
+  toolName: ToolName;
 }
 
 export function preToolUse(context: ToolCallContext): void {

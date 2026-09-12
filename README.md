@@ -51,17 +51,16 @@ Três regras que explicam a maior parte do código:
 
 ## Status
 
-Fases 0–8 concluídas (ver `CLAUDE.md` para o detalhe de cada uma). Os serviços de cada fase são
-testados isoladamente; o pipeline completo **ainda não está wireado** em
-`app/api/documents/route.ts`, que hoje cobre ingestão, sanitização e persistência da execução.
+Fases 0–8 concluídas (ver `CLAUDE.md` para o detalhe de cada uma). O endpoint
+`app/api/documents/route.ts` já executa o pipeline completo de upload até relatório final.
 
-Duas pendências, ambas dependendo de ação humana e não de código:
+Duas pendências seguem como gates operacionais:
 
-- **Fase 9 — integração real do TJPR**: bloqueada pela inspeção manual do portal exigida por HU-38
-  (§9). Nenhum adaptador real pode ser escrito antes disso, e contornar login/CAPTCHA/rate limit
-  está fora de escopo por decisão de produto. Roteiro e critério de decisão em
-  [`docs/tjpr-portal-validacao.md`](docs/tjpr-portal-validacao.md). **Até lá, a fonte de
-  jurisprudência é fixture — dados fictícios de demonstração, nunca o portal real.**
+- **Fase 9 — integração real do TJPR**: há um provider inicial em `lib/providers/tjpr.ts`, opt-in
+  por `.env`, usando a busca pública HTML validada a partir da collection Postman. Ele ainda depende
+  da validação manual de termos de uso, rate limit e paginação antes de ser tratado como integração
+  definitiva. Roteiro e critério de decisão em
+  [`docs/tjpr-portal-validacao.md`](docs/tjpr-portal-validacao.md).
 - **Fase 10 — deploy**: o repositório está pronto (migration, variáveis, build); criar o projeto
   Supabase e publicar na Vercel são passos manuais, descritos abaixo.
 
@@ -74,10 +73,11 @@ npm install
 npm run dev          # http://localhost:3000
 ```
 
-### Sem nenhuma credencial (modo fixture)
+### Jurisprudência: fixture ou TJPR
 
-É um modo de operação legítimo, não um fallback degradado — é o que sustenta o critério de aceite
-16 (§12): a aplicação funciona sem depender de conectividade externa.
+Sem `JURISPRUDENCE_PROVIDER`, a aplicação usa fixture. É um modo de operação legítimo, não um
+fallback degradado — é o que sustenta o critério de aceite 16 (§12): a aplicação funciona sem
+depender de conectividade externa.
 
 Sem variáveis de ambiente:
 
@@ -89,6 +89,17 @@ Sem variáveis de ambiente:
   modelo. É onde os critérios de aceite de HU-26/27/28 se conferem no navegador;
 - upload, validação e parsing de documento funcionam normalmente. O que **não** funciona sem
   credencial são os serviços que chamam LLM (Case Understanding, geração de queries, Scratchpads).
+
+Para testar com o portal real do TJPR:
+
+```bash
+JURISPRUDENCE_PROVIDER=tjpr
+# TJPR_BASE_URL=https://portal.tjpr.jus.br
+```
+
+Nesse modo, o TJPR é primário e a fixture é fallback visível em `metadata.source`. A busca usa
+`GET /jurisprudencia/publico/pesquisa.do` e cada decisão é reaberta pela URL completa retornada no
+HTML da busca; `/jurisprudencia/j/{id}` sozinho não é assumido como URL válida.
 
 ### Com LLM
 

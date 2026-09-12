@@ -20,8 +20,10 @@ import { getRepository } from "../../../lib/persistence/get-repository";
 import { createRepositoryScratchpadCache } from "../../../lib/persistence/scratchpad-cache";
 import { createExecutionRecorder } from "../../../lib/observability/execution-recorder";
 import { buildPipelineProgress } from "../../../lib/observability/pipeline-progress";
+import { createGuardedExecution } from "../../../lib/hooks/guarded-execution";
 import { PIPELINE_VERSION, scratchpadVersions } from "../../../lib/config/versions";
 import { createStageRecorder } from "../../../lib/workflow/pipeline-stage-event";
+import type { WorkflowStage } from "../../../lib/workflow/state-machine";
 import { MIN_VALID_SCRATCHPADS } from "../../../lib/config/limits";
 import { createAppError, type AppError } from "../../../lib/errors/app-error";
 import type { ToolResult } from "../../../lib/errors/tool-result";
@@ -30,7 +32,7 @@ import type { JurisFlowRepository } from "../../../lib/persistence/repository";
 
 export const runtime = "nodejs";
 
-const STAGE = "DOCUMENT_ANALYSIS" as const;
+const INITIAL_STAGE = "DOCUMENT_ANALYSIS" as const;
 
 function errorResponse(error: AppError) {
   const status =
@@ -103,6 +105,27 @@ export async function POST(request: Request) {
     workflowId: runId,
     sink: (log) => void repository.saveToolExecution(log),
   });
+  let currentStage: WorkflowStage = INITIAL_STAGE;
+
+  const guardedExecution = createGuardedExecution({
+    getStage: () => currentStage,
+    recorder: execution,
+    onBlockedTool: async (error) => {
+      await repository.saveError({
+        runId,
+        traceId,
+        code: error.code,
+        category: error.category,
+        severity: error.severity,
+        description: error.description,
+        userMessage: error.userMessage,
+        isRetryable: error.isRetryable,
+        operation: error.operation,
+        metadata: error.metadata,
+        occurredAt: new Date().toISOString(),
+      });
+    },
+  });
 
   async function failWith(error: AppError) {
     await repository.saveError({
@@ -135,7 +158,7 @@ export async function POST(request: Request) {
   const run = await repository.createRun({
     runId,
     traceId,
-    stage: STAGE,
+    stage: INITIAL_STAGE,
     status: "UPLOADED",
     pipelineVersion: PIPELINE_VERSION,
     startedAt,
@@ -147,14 +170,14 @@ export async function POST(request: Request) {
 
   const buffer = Buffer.from(await file.arrayBuffer());
 
-  const validation = await execution.run("validateFile", () => validateFile(buffer, file.name));
+  const validation = await guardedExecution.run("validateFile", () => validateFile(buffer, file.name));
   if (validation.isError) {
     recorder.record("VALIDATING", "Validando arquivo", "FAILED", receivedAt);
     return failWith(validation.error);
   }
   recorder.record("VALIDATING", "Validando arquivo", "COMPLETED", receivedAt);
 
-  const parsed = await execution.run("parseDocument", () =>
+  const parsed = await guardedExecution.run("parseDocument", () =>
     parseDocument(buffer, file.name, validation.data.mimeType),
   );
   if (parsed.isError) {
@@ -163,7 +186,7 @@ export async function POST(request: Request) {
   }
   recorder.record("PARSING", "Extraindo texto", "COMPLETED", receivedAt);
 
-  const sanitized = await execution.run("sanitizeDocument", async () =>
+  const sanitized = await guardedExecution.run("sanitizeDocument", async () =>
     sanitizeDocument(parsed.data.documentId, parsed.data.text),
   );
   if (sanitized.isError) {
@@ -200,7 +223,7 @@ export async function POST(request: Request) {
   const sourceProvider = getJurisprudenceProvider();
   const jurisprudenceProvider = createCachedJurisprudenceProvider(sourceProvider, repository);
 
-  const caseAnalysis = await execution.run("analyzeCase", () =>
+  const caseAnalysis = await guardedExecution.run("analyzeCase", () =>
     analyzeCase(sanitized.data, llmProvider),
   );
   if (caseAnalysis.isError) return failWith(caseAnalysis.error);
@@ -218,28 +241,36 @@ export async function POST(request: Request) {
     failWith,
   );
   if (caseAnalyzed instanceof NextResponse) return caseAnalyzed;
+  currentStage = "QUERY_GENERATION";
 
-  const queryPlan = await execution.run("generateSearchQueries", () =>
+  const queryPlan = await guardedExecution.run("generateSearchQueries", () =>
     generateSearchQueries(caseAnalysis.data, llmProvider),
   );
   if (queryPlan.isError) return failWith(queryPlan.error);
 
-  const queriesGenerated = await persist(repository.updateRun(runId, { status: "QUERIES_GENERATED" }), failWith);
+  const queriesGenerated = await persist(
+    repository.updateRun(runId, { stage: "SEARCH", status: "QUERIES_GENERATED" }),
+    failWith,
+  );
   if (queriesGenerated instanceof NextResponse) return queriesGenerated;
+  currentStage = "SEARCH";
 
   const foundItems: JurisprudenceSearchItem[] = [];
+  const jurisprudenceSources = new Set<string>();
   for (const searchQuery of queryPlan.data.queries) {
     const query = { query: searchQuery.query };
-    const searchResult = await execution.run("searchJurisprudence", () =>
+    const searchResult = await guardedExecution.run("searchJurisprudence", () =>
       jurisprudenceProvider.search(query),
     );
     if (searchResult.isError) return failWith(searchResult.error);
+    const searchProvider = searchResult.metadata?.source ?? sourceProvider.name;
+    jurisprudenceSources.add(searchProvider);
 
     const savedSearch = await persist(repository.saveSearch({
       searchId: randomUUID(),
       runId,
       query,
-      provider: sourceProvider.name,
+      provider: searchProvider,
       totalCount: searchResult.data.totalCount,
       items: searchResult.data.items,
       createdAt: new Date().toISOString(),
@@ -261,10 +292,11 @@ export async function POST(request: Request) {
     failWith,
   );
   if (searchComplete instanceof NextResponse) return searchComplete;
+  currentStage = "SCRATCHPAD_GENERATION";
 
   const versions = scratchpadVersions(llmProvider);
   const scratchpadCache = createRepositoryScratchpadCache({ repository, runId, versions });
-  const scratchpadBatch = await execution.run("generateScratchpads", () =>
+  const scratchpadBatch = await guardedExecution.run("generateScratchpads", () =>
     generateScratchpads(selected.data, llmProvider, jurisprudenceProvider, undefined, scratchpadCache),
   );
   if (scratchpadBatch.isError) return failWith(scratchpadBatch.error);
@@ -279,8 +311,9 @@ export async function POST(request: Request) {
     failWith,
   );
   if (scratchpadsComplete instanceof NextResponse) return scratchpadsComplete;
+  currentStage = "CROSS_FILE_ANALYSIS";
 
-  const crossFile = await execution.run("analyzeCrossFile", () =>
+  const crossFile = await guardedExecution.run("analyzeCrossFile", () =>
     analyzeCrossFile(caseAnalysis.data, scratchpadBatch.data.scratchpads, llmProvider),
   );
   if (crossFile.isError) return failWith(crossFile.error);
@@ -300,8 +333,9 @@ export async function POST(request: Request) {
     failWith,
   );
   if (crossFileComplete instanceof NextResponse) return crossFileComplete;
+  currentStage = "EVIDENCE_VERIFICATION";
 
-  const evidence = await execution.run("verifyEvidence", () =>
+  const evidence = await guardedExecution.run("verifyEvidence", () =>
     verifyEvidence(crossFile.data.analyses, scratchpadBatch.data.scratchpads, sourceProvider),
   );
   if (evidence.isError) return failWith(evidence.error);
@@ -320,9 +354,10 @@ export async function POST(request: Request) {
     failWith,
   );
   if (evidenceVerified instanceof NextResponse) return evidenceVerified;
+  currentStage = "REPORT_GENERATION";
 
   const evidencePolicy = enforceEvidencePolicy(crossFile.data.analyses, evidence.data.evidences);
-  const report = await execution.run("buildReport", async () =>
+  const report = await guardedExecution.run("buildReport", async () =>
     buildReport({
       caseAnalysis: caseAnalysis.data,
       analyses: evidencePolicy.analyses,
@@ -373,7 +408,7 @@ export async function POST(request: Request) {
     provider: {
       llm: llmProvider.name,
       model: llmProvider.model,
-      jurisprudence: sourceProvider.name,
+      jurisprudence: Array.from(jurisprudenceSources).join(", ") || sourceProvider.name,
     },
     scratchpads: {
       requested: scratchpadBatch.data.requested,
