@@ -12,7 +12,11 @@ export interface GuardedExecutionConfig {
 }
 
 export interface GuardedExecution {
-  run<T>(toolName: ToolName, operation: () => Promise<ToolResult<T>>): Promise<ToolResult<T>>;
+  run<T>(
+    toolName: ToolName,
+    operation: () => Promise<ToolResult<T>>,
+    validator?: <T>(result: ToolResult<T>) => ToolResult<T>,
+  ): Promise<ToolResult<T>>;
 }
 
 function blockedToolError(stage: WorkflowStage, toolName: ToolName, cause: unknown): AppError {
@@ -38,7 +42,11 @@ function blockedToolError(stage: WorkflowStage, toolName: ToolName, cause: unkno
  */
 export function createGuardedExecution(config: GuardedExecutionConfig): GuardedExecution {
   return {
-    async run<T>(toolName: ToolName, operation: () => Promise<ToolResult<T>>): Promise<ToolResult<T>> {
+    async run<T>(
+      toolName: ToolName,
+      operation: () => Promise<ToolResult<T>>,
+      validator?: <T>(result: ToolResult<T>) => ToolResult<T>,
+    ): Promise<ToolResult<T>> {
       const stage = config.getStage();
 
       try {
@@ -51,7 +59,7 @@ export function createGuardedExecution(config: GuardedExecutionConfig): GuardedE
       }
 
       const result = await config.recorder.run(toolName, operation);
-      return postToolUse(result, { stage, toolName });
+      return postToolUse(result, { stage, toolName, validator });
     },
   };
 }
