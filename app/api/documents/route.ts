@@ -38,8 +38,10 @@ export async function POST(request: Request) {
   }
 
   let llmProvider;
+  let crossFileLlmProvider;
   try {
     llmProvider = getLlmProvider();
+    crossFileLlmProvider = getLlmProvider(process.env, "crossFile");
   } catch (cause) {
     return errorResponse(pipelineUnexpectedError("getLlmProvider", cause));
   }
@@ -90,7 +92,7 @@ export async function POST(request: Request) {
             traceId: randomUUID(),
             file: { name: file.name, size: file.size, type: file.type, bytes },
           },
-          { repository, llmProvider, jurisprudenceProvider, signal: controller.signal },
+          { repository, llmProvider, crossFileLlmProvider, jurisprudenceProvider, signal: controller.signal },
         )) {
           write(event);
         }

@@ -3,6 +3,7 @@ import { createAppError } from "../../errors/app-error";
 import { isRetryable } from "../../errors/error-classifier";
 import { toolFailure, type ToolResult } from "../../errors/tool-result";
 import type { GenerateStructuredParams, LlmProvider } from "../provider";
+import { toStrictJsonSchema } from "../to-strict-json-schema";
 import { parseStructuredOutput } from "../validate-structured-output";
 
 /**
@@ -11,9 +12,17 @@ import { parseStructuredOutput } from "../validate-structured-output";
  * duplicado porque é literalmente o mesmo formato de requisição e resposta: duplicar significaria
  * corrigir bug de parsing duas vezes.
  *
- * Usa `json_object` (não `json_schema` estrito): o modo strict exige todo campo `required` e não
- * representa bem optionals do Zod. O schema vai embutido no prompt como referência e a validação
- * real acontece sempre em `parseStructuredOutput` (§11.7) — o contrato nunca depende do provider.
+ * `structuredOutputMode` decide como a forma é cobrada do modelo. `json_object` garante apenas
+ * "é JSON": o schema vai como texto no prompt e nada impede o modelo de degenerar `["SP-1"]` em
+ * `"SP-1"`. `json_schema` impõe a forma no servidor durante a geração e elimina essa classe de
+ * erro — a objeção antiga (o modo estrito exige todo campo em `required` e não representa optional
+ * do Zod) é hoje trabalho de `toStrictJsonSchema`, com `normalizeModelOutput` traduzindo o `null`
+ * resultante de volta para chave ausente.
+ *
+ * O default continua `json_object` porque o DeepSeek só suporta esse modo; quem tem o estrito o
+ * pede explicitamente. Em qualquer um dos dois, a validação real acontece sempre em
+ * `parseStructuredOutput` (§11.7) — o contrato nunca depende do provider, e o modo estrito garante
+ * forma, não conteúdo (`minItems` e as regras de `superRefine` não viajam no JSON Schema).
  */
 export interface OpenAiCompatibleProviderConfig {
   /** Identidade do provider em `AppError.source`, `ToolResult.metadata` e na chave de cache de HU-33. */
@@ -23,6 +32,8 @@ export interface OpenAiCompatibleProviderConfig {
   model: string;
   maxTokensParameter?: "max_tokens" | "max_completion_tokens";
   reasoningEffort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  /** Default `json_object`: é o único modo que o DeepSeek suporta. */
+  structuredOutputMode?: "json_object" | "json_schema";
 }
 
 interface ChatCompletionResponse {
@@ -46,7 +57,15 @@ interface ChatCompletionResponse {
 }
 
 export function createOpenAiCompatibleProvider(config: OpenAiCompatibleProviderConfig): LlmProvider {
-  const { name, apiUrl, apiKey, model, maxTokensParameter = "max_tokens", reasoningEffort } = config;
+  const {
+    name,
+    apiUrl,
+    apiKey,
+    model,
+    maxTokensParameter = "max_tokens",
+    reasoningEffort,
+    structuredOutputMode = "json_object",
+  } = config;
   const errorPrefix = name.toUpperCase();
 
   return {
@@ -54,10 +73,28 @@ export function createOpenAiCompatibleProvider(config: OpenAiCompatibleProviderC
     model,
     async generateStructured<T>(params: GenerateStructuredParams<T>): Promise<ToolResult<T>> {
       const jsonSchema = z.toJSONSchema(params.schema, { target: "draft-7" });
-      const systemWithSchema = `${params.system}
+      const strict = structuredOutputMode === "json_schema";
+
+      // No modo estrito o schema viaja no parâmetro da API e é imposto durante a geração; repeti-lo
+      // no prompt só gastaria contexto. No modo json_object ele é a única referência que o modelo
+      // tem da forma esperada.
+      const systemWithSchema = strict
+        ? params.system
+        : `${params.system}
 
 Responda APENAS com um objeto JSON válido que corresponda exatamente a este JSON Schema (nome: ${params.schemaName}):
 ${JSON.stringify(jsonSchema)}`;
+
+      const responseFormat = strict
+        ? {
+            type: "json_schema" as const,
+            json_schema: {
+              name: params.schemaName,
+              strict: true,
+              schema: toStrictJsonSchema(jsonSchema),
+            },
+          }
+        : { type: "json_object" as const };
 
       let response: Response;
       try {
@@ -72,7 +109,7 @@ ${JSON.stringify(jsonSchema)}`;
             model,
             [maxTokensParameter]: params.maxOutputTokens ?? 4096,
             ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-            response_format: { type: "json_object" },
+            response_format: responseFormat,
             messages: [
               { role: "system", content: systemWithSchema },
               { role: "user", content: params.prompt },

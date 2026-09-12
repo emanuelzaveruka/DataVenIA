@@ -8,6 +8,7 @@ import {
 } from "../../schemas/cross-file.schema";
 import type { LlmProvider } from "../../llm/provider";
 import { generateStructuredWithRetry } from "../../llm/generate-with-retry";
+import { CROSS_FILE_MAX_OUTPUT_TOKENS } from "../../config/limits";
 import { createAppError } from "../../errors/app-error";
 import { toolFailure, toolSuccess, type ToolResult } from "../../errors/tool-result";
 import { buildCrossFilePrompt, CROSS_FILE_SYSTEM_PROMPT } from "./prompts";
@@ -111,6 +112,7 @@ export async function analyzeCrossFile(
     schemaName: "CrossFileAnalysis",
     schemaDescription:
       "Análise cruzada dos Scratchpads válidos, uma entrada por questão jurídica do caso.",
+    maxOutputTokens: CROSS_FILE_MAX_OUTPUT_TOKENS,
     signal,
   });
 

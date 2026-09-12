@@ -5,6 +5,12 @@ export interface ToolResultMetadata {
   attempts?: number;
   source?: string;
   traceId?: string;
+  /**
+   * Reparos sintáticos aplicados à saída bruta do modelo antes da validação (§11.7). Existe para
+   * que tolerar uma degradação de forma nunca seja silencioso: reparo recorrente é sinal de que o
+   * prompt ou o modelo precisa mudar, não ruído a absorver.
+   */
+  repairs?: string[];
 }
 
 export interface ToolSuccess<T> {

@@ -56,6 +56,41 @@ describe("OpenAI-compatible providers", () => {
     expect(body.reasoning_effort).toBeUndefined();
   });
 
+  it("asks OpenAI for strict json_schema, which is what makes the shape enforced server-side", async () => {
+    const fetch = fetchMock();
+    vi.stubGlobal("fetch", fetch);
+
+    await generateWith(createOpenAiProvider({ apiKey: "key", model: "gpt-5-nano" }));
+
+    const body = JSON.parse(fetch.mock.calls[0]![1]!.body as string);
+    expect(body.response_format.type).toBe("json_schema");
+    expect(body.response_format.json_schema.strict).toBe(true);
+    expect(body.response_format.json_schema.name).toBe("TestSchema");
+    expect(body.response_format.json_schema.schema.properties.ok).toBeDefined();
+    // No modo estrito o schema viaja no parâmetro; repeti-lo no prompt só gastaria contexto.
+    expect(body.messages[0].content).toBe("system");
+  });
+
+  it("keeps DeepSeek on json_object with the schema in the prompt — it has no strict mode", async () => {
+    const fetch = fetchMock();
+    vi.stubGlobal("fetch", fetch);
+
+    await generateWith(createDeepseekProvider({ apiKey: "key" }));
+
+    const body = JSON.parse(fetch.mock.calls[0]![1]!.body as string);
+    expect(body.response_format).toEqual({ type: "json_object" });
+    expect(body.messages[0].content).toContain("JSON Schema");
+  });
+
+  it("lets the caller raise reasoning_effort above the default for a harder stage", async () => {
+    const fetch = fetchMock();
+    vi.stubGlobal("fetch", fetch);
+
+    await generateWith(createOpenAiProvider({ apiKey: "key", model: "gpt-5-nano", reasoningEffort: "medium" }));
+
+    expect(JSON.parse(fetch.mock.calls[0]![1]!.body as string).reasoning_effort).toBe("medium");
+  });
+
   it("returns diagnostic metadata when a chat completion has no message content", async () => {
     vi.stubGlobal(
       "fetch",

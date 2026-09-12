@@ -47,3 +47,12 @@ export const QUOTE_MATCH_MIN_SIMILARITY = 0.9;
 export const MIN_DECISIONS_FOR_CONVERGENCE = 4;
 export const HIGH_CONVERGENCE_RATIO = 0.75;
 export const DIVIDED_CONVERGENCE_MARGIN = 0.15;
+
+/**
+ * Teto de tokens de saída da análise cruzada (§3.8). O default do provider é 4096, dimensionado
+ * para respostas de uma etapa só; o cross-file devolve uma entrada por questão jurídica, cada uma
+ * com cinco listas de IDs, riscos e argumentos, e cresce com o tamanho do caso. Estourar o teto
+ * trunca o JSON no meio e a falha chega como `STRUCTURED_OUTPUT_NOT_JSON` — um erro de forma que
+ * parece erro de modelo e consome as três tentativas sem chance de acerto.
+ */
+export const CROSS_FILE_MAX_OUTPUT_TOKENS = 16000;

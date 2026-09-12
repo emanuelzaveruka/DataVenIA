@@ -5,13 +5,24 @@ import { z } from "zod";
  * caso. É a etapa REDUCE do §2.3: recebe apenas `CaseAnalysis` + Scratchpads + IDs das decisões,
  * nunca os documentos originais.
  */
+/**
+ * As mensagens de `.min(1)` abaixo não são cosméticas: `withRetryFeedback`
+ * (`lib/llm/generate-with-retry.ts`) devolve ao modelo o texto literal do erro de validação, e o
+ * texto padrão do Zod ("Too small: expected array to have >=1 items") descreve a violação sem
+ * dizer o que fazer com ela. Um modelo que acabou de escrever uma afirmação sem citação lê isso e
+ * tende a inventar um evidenceId para preencher a lista. A mensagem precisa nomear a saída válida
+ * — remover a afirmação — como a correção esperada.
+ */
+const EVIDENCE_REQUIRED_MESSAGE =
+  "toda afirmação precisa apontar ao menos um evidenceId real dos evidenceCandidates fornecidos. Se nenhum trecho sustenta esta afirmação, REMOVA a afirmação inteira da lista em vez de enviar evidenceIds vazio — nunca invente um id para preencher o campo (HU-23/HU-25).";
+
 export const RiskSchema = z.object({
   description: z.string().min(1),
   /**
    * HU-23: um risco sem `evidenceIds` é afirmação genérica sem lastro e não pode chegar ao
    * relatório — a regra é estrutural aqui, não uma recomendação de prompt.
    */
-  evidenceIds: z.array(z.string().min(1)).min(1),
+  evidenceIds: z.array(z.string().min(1)).min(1, EVIDENCE_REQUIRED_MESSAGE),
 });
 export type Risk = z.infer<typeof RiskSchema>;
 
@@ -21,7 +32,7 @@ export const SuggestedArgumentSchema = z.object({
    * HU-25: a cadeia `argumento → evidenceId → VerifiedEvidence → fonte original` começa aqui. Um
    * argumento sem `evidenceIds` não teria como ser verificado depois, então nem é aceito.
    */
-  evidenceIds: z.array(z.string().min(1)).min(1),
+  evidenceIds: z.array(z.string().min(1)).min(1, EVIDENCE_REQUIRED_MESSAGE),
 });
 export type SuggestedArgument = z.infer<typeof SuggestedArgumentSchema>;
 

@@ -55,6 +55,40 @@ describe("getLlmProvider", () => {
     );
   });
 
+  it("keeps the cross-file stage on the default model when no override is set", () => {
+    const vars = env({ OPENAI_API_KEY: "a", OPENAI_MODEL: "gpt-5-nano" });
+    expect(getLlmProvider(vars, "crossFile").model).toBe(getLlmProvider(vars).model);
+  });
+
+  it("runs only the cross-file stage on OPENAI_MODEL_CROSS_FILE, leaving the rest untouched", () => {
+    const vars = env({
+      OPENAI_API_KEY: "a",
+      OPENAI_MODEL: "gpt-5-nano",
+      OPENAI_MODEL_CROSS_FILE: "gpt-5",
+    });
+
+    expect(getLlmProvider(vars, "crossFile").model).toBe("gpt-5");
+    // O MAP faz uma chamada de modelo por decisão: encarecê-lo junto anularia o ganho da separação.
+    expect(getLlmProvider(vars).model).toBe("gpt-5-nano");
+  });
+
+  it("rejects an invalid reasoning effort instead of silently ignoring it", () => {
+    const vars = env({ OPENAI_API_KEY: "a", OPENAI_REASONING_EFFORT_CROSS_FILE: "altissimo" });
+    expect(() => getLlmProvider(vars, "crossFile")).toThrow(/OPENAI_REASONING_EFFORT_CROSS_FILE/);
+  });
+
+  it("keeps the per-stage model distinct in the HU-33 idempotency key", () => {
+    const vars = env({
+      OPENAI_API_KEY: "a",
+      OPENAI_MODEL: "gpt-5-nano",
+      OPENAI_MODEL_CROSS_FILE: "gpt-5",
+    });
+
+    // `provider.model` é o que separa a chave de cache por modelo (§11.6): se os dois providers
+    // reportassem o mesmo, um resultado gerado por um modelo seria reusado como se fosse do outro.
+    expect(getLlmProvider(vars, "crossFile").model).not.toBe(getLlmProvider(vars).model);
+  });
+
   it("fails when nothing is configured", () => {
     expect(() => getLlmProvider(env({}))).toThrow(/Nenhum provider/);
   });

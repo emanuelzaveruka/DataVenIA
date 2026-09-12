@@ -7,6 +7,11 @@ const DEFAULT_MODEL = "gpt-4o-mini";
 export interface OpenAiProviderConfig {
   apiKey: string;
   model?: string;
+  /**
+   * Só chega à API em modelos de reasoning. O default `"minimal"` serve às etapas simples; etapas
+   * com saída estruturada difícil (o cross-file, §3.8) pedem mais explicitamente.
+   */
+  reasoningEffort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 }
 
 /**
@@ -24,6 +29,9 @@ export function createOpenAiProvider(config: OpenAiProviderConfig): LlmProvider 
     apiKey: config.apiKey,
     model,
     maxTokensParameter: isReasoningModel ? "max_completion_tokens" : "max_tokens",
-    reasoningEffort: isReasoningModel ? "minimal" : undefined,
+    reasoningEffort: isReasoningModel ? (config.reasoningEffort ?? "minimal") : undefined,
+    // A OpenAI impõe o schema durante a geração; o DeepSeek, que compartilha este núcleo, não tem
+    // o modo estrito e por isso fica no default `json_object`.
+    structuredOutputMode: "json_schema",
   });
 }

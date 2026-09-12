@@ -4,6 +4,7 @@ import {
   type CrossFileAnalysis,
   type CrossFileReferenceContext,
 } from "../../../schemas/cross-file.schema";
+import { normalizeModelOutput } from "../../../llm/normalize-model-output";
 
 const context: CrossFileReferenceContext = {
   legalIssueIds: ["LI-1", "LI-2"],
@@ -168,6 +169,55 @@ describe("buildCrossFileAnalysisResponseSchema", () => {
     ]);
     expect(result.success).toBe(false);
     expect(messages(result)).toContain("contrários");
+  });
+
+  /**
+   * O incidente real: o modelo devolveu `strongest*` como string nas duas análises e um risco com
+   * `evidenceIds` vazio. Cinco violações derrubaram as duas análises e esgotaram as 3 tentativas.
+   * Depois da correção, os quatro erros de forma somem na normalização e sobra só o de conteúdo —
+   * agora com uma mensagem que diz ao modelo o que fazer.
+   */
+  it("survives the exact payload of the incident: only the semantic error is left", () => {
+    const raw = {
+      analyses: [
+        { ...analysis(), strongestSupporting: "SP-1", strongestOpposing: "SP-2" },
+        {
+          ...analysis({ legalIssueId: "LI-2" }),
+          strongestSupporting: "SP-1",
+          strongestOpposing: "SP-2",
+          risks: [{ description: "Risco sem nenhuma citação que o sustente.", evidenceIds: [] }],
+        },
+      ],
+    };
+
+    const schema = buildCrossFileAnalysisResponseSchema(context);
+    const { value, repairs } = normalizeModelOutput(schema, raw);
+
+    expect(repairs.map((repair) => repair.path)).toEqual([
+      "analyses.0.strongestSupporting",
+      "analyses.0.strongestOpposing",
+      "analyses.1.strongestSupporting",
+      "analyses.1.strongestOpposing",
+    ]);
+
+    const result = schema.safeParse(value);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+
+    expect(result.error.issues).toHaveLength(1);
+    expect(result.error.issues[0]!.path.join(".")).toBe("analyses.1.risks.0.evidenceIds");
+    expect(result.error.issues[0]!.message).toContain("REMOVA a afirmação");
+  });
+
+  it("tells the model to remove an unsupported claim instead of leaving evidenceIds empty (HU-23)", () => {
+    const result = parse([
+      analysis({ risks: [{ description: "Afirmação genérica sem lastro.", evidenceIds: [] }] }),
+      analysis({ legalIssueId: "LI-2" }),
+    ]);
+
+    expect(messages(result)).toContain("REMOVA a afirmação");
+    // A instrução precisa fechar as duas saídas erradas: preencher com id falso e deixar vazio.
+    expect(messages(result)).toContain("nunca invente um id");
   });
 
   it("treats a missing sampleCoverage as COVERED, so the old contract keeps its guarantees", () => {

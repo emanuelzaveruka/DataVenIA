@@ -71,6 +71,14 @@ export interface RunPipelineDeps {
   repository: DataVeniaRepository;
   llmProvider: LlmProvider;
   /**
+   * Modelo do cross-file, quando ele não é o mesmo do resto do pipeline. Default: `llmProvider`.
+   * A etapa REDUCE (§3.8) é a saída estruturada mais difícil do pipeline — schema construído por
+   * execução e a maior parte das regras em `superRefine`, que o modelo nunca vê no JSON Schema —,
+   * então vale poder rodá-la em um modelo mais capaz sem encarecer o MAP, que faz uma chamada por
+   * decisão.
+   */
+  crossFileLlmProvider?: LlmProvider;
+  /**
    * A fonte **sem cache**. O cache de decisão bruta (§11.8) é montado aqui por cima dela, mas
    * `verifyEvidence` recebe a fonte crua de propósito: servida pelo cache, HU-24 compararia o hash
    * com ele mesmo e "a fonte mudou desde a coleta" nunca dispararia.
@@ -91,7 +99,7 @@ export interface PipelineResultPayload {
   redactions: RedactionSummary[];
   stages: PipelineStageEvent[];
   progress: PipelineProgressStep[];
-  provider: { llm: string; model: string; jurisprudence: string };
+  provider: { llm: string; model: string; crossFileModel?: string; jurisprudence: string };
   scratchpads: { requested: number; processed: number; failed: number; status: string };
   report: FinalReport;
 }
@@ -154,6 +162,7 @@ export async function* runPipeline(
   deps: RunPipelineDeps,
 ): AsyncGenerator<PipelineEvent, void> {
   const { repository, llmProvider, jurisprudenceProvider: sourceProvider, signal } = deps;
+  const crossFileLlmProvider = deps.crossFileLlmProvider ?? llmProvider;
   const { runId, traceId, file } = input;
 
   const recorder = createStageRecorder();
@@ -608,7 +617,7 @@ export async function* runPipeline(
   yield { type: "stage", event: recorder.start("CROSS_FILE_ANALYSIS", "Análise Cruzada", crossFileDetail) };
   const tCross = Date.now();
   const crossFile = await guardedExecution.run("analyzeCrossFile", () =>
-    analyzeCrossFile(caseAnalysis.data, scratchpadBatch.data.scratchpads, llmProvider, signal),
+    analyzeCrossFile(caseAnalysis.data, scratchpadBatch.data.scratchpads, crossFileLlmProvider, signal),
   );
   if (crossFile.isError) {
     yield* failStage("CROSS_FILE_ANALYSIS", "Análise Cruzada", tCross, crossFile.error, crossFileDetail);
@@ -767,6 +776,10 @@ export async function* runPipeline(
       provider: {
         llm: llmProvider.name,
         model: llmProvider.model,
+        // Só aparece quando o cross-file roda em outro modelo — senão a linha diria duas vezes a
+        // mesma coisa. §14 exige saber qual modelo produziu cada etapa.
+        crossFileModel:
+          crossFileLlmProvider.model === llmProvider.model ? undefined : crossFileLlmProvider.model,
         jurisprudence: Array.from(jurisprudenceSources).join(", ") || sourceProvider.name,
       },
       scratchpads: {

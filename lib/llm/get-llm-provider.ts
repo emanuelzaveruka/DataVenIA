@@ -2,15 +2,58 @@ import { createCircuitBreaker } from "../errors/circuit-breaker";
 import type { LlmProvider } from "./provider";
 import { createAnthropicProvider } from "./providers/anthropic-provider";
 import { createDeepseekProvider } from "./providers/deepseek-provider";
-import { createOpenAiProvider } from "./providers/openai-provider";
+import { createOpenAiProvider, type OpenAiProviderConfig } from "./providers/openai-provider";
 import { createResilientLlmProvider } from "./resilient-llm-provider";
 
 export const LLM_PROVIDER_NAMES = ["openai", "deepseek", "anthropic"] as const;
 export type LlmProviderName = (typeof LLM_PROVIDER_NAMES)[number];
 
+/**
+ * Etapas que podem rodar em um modelo diferente do resto do pipeline. Só o cross-file existe hoje,
+ * e por um motivo concreto: é a única etapa cujo schema de saída é construído por execução, e a
+ * maior parte das suas regras (integridade referencial, cobertura por questão jurídica, HU-22)
+ * vive em `superRefine`, que não é representável em JSON Schema e portanto nunca chega ao modelo —
+ * ele tem de acertá-las a partir do prompt. É a saída estruturada mais difícil do pipeline, e a que
+ * menos se beneficia do modelo mais barato.
+ *
+ * Separar por etapa é seguro porque `provider.model` entra na chave de idempotência de HU-33
+ * (§11.6): o cache já distingue resultados por modelo, então não há reuso silencioso entre eles.
+ */
+export const LLM_STAGES = ["default", "crossFile"] as const;
+export type LlmStage = (typeof LLM_STAGES)[number];
+
+interface StageOverrides {
+  model?: string;
+  reasoningEffort?: OpenAiProviderConfig["reasoningEffort"];
+}
+
+function isReasoningEffort(value: string | undefined): value is NonNullable<StageOverrides["reasoningEffort"]> {
+  return value !== undefined && ["none", "minimal", "low", "medium", "high", "xhigh"].includes(value);
+}
+
+/**
+ * `OPENAI_MODEL_CROSS_FILE` / `OPENAI_REASONING_EFFORT_CROSS_FILE` sobrescrevem só esta etapa; sem
+ * elas, nada muda em relação ao comportamento anterior.
+ */
+function overridesFor(stage: LlmStage, env: NodeJS.ProcessEnv): StageOverrides {
+  if (stage !== "crossFile") return {};
+
+  const effort = env.OPENAI_REASONING_EFFORT_CROSS_FILE?.trim();
+  if (effort && !isReasoningEffort(effort)) {
+    throw new Error(
+      `OPENAI_REASONING_EFFORT_CROSS_FILE="${effort}" é inválido. Valores aceitos: none, minimal, low, medium, high, xhigh.`,
+    );
+  }
+
+  return {
+    model: env.OPENAI_MODEL_CROSS_FILE?.trim() || undefined,
+    reasoningEffort: isReasoningEffort(effort) ? effort : undefined,
+  };
+}
+
 interface ProviderSlot {
   name: LlmProviderName;
-  create: (env: NodeJS.ProcessEnv) => LlmProvider;
+  create: (env: NodeJS.ProcessEnv, overrides: StageOverrides) => LlmProvider;
   isConfigured: (env: NodeJS.ProcessEnv) => boolean;
 }
 
@@ -22,7 +65,12 @@ const PROVIDER_SLOTS: ProviderSlot[] = [
   {
     name: "openai",
     isConfigured: (env) => Boolean(env.OPENAI_API_KEY),
-    create: (env) => createOpenAiProvider({ apiKey: env.OPENAI_API_KEY!, model: env.OPENAI_MODEL }),
+    create: (env, overrides) =>
+      createOpenAiProvider({
+        apiKey: env.OPENAI_API_KEY!,
+        model: overrides.model ?? env.OPENAI_MODEL,
+        reasoningEffort: overrides.reasoningEffort,
+      }),
   },
   {
     name: "deepseek",
@@ -56,7 +104,9 @@ function isProviderName(value: string | undefined): value is LlmProviderName {
  * Um provider nomeado explicitamente sem a chave correspondente é erro, não degradação: preferir
  * outro modelo em silêncio esconderia exatamente o problema que a pessoa quer ver.
  */
-export function getLlmProvider(env: NodeJS.ProcessEnv = process.env): LlmProvider {
+export function getLlmProvider(env: NodeJS.ProcessEnv = process.env, stage: LlmStage = "default"): LlmProvider {
+  const overrides = overridesFor(stage, env);
+
   const explicitPrimary = env.LLM_PROVIDER?.trim();
   const explicitFallback = env.LLM_FALLBACK_PROVIDER?.trim();
 
@@ -88,8 +138,8 @@ export function getLlmProvider(env: NodeJS.ProcessEnv = process.env): LlmProvide
       ? undefined
       : available.find((slot) => slot.name !== primarySlot.name);
 
-  const primary = primarySlot.create(env);
+  const primary = primarySlot.create(env, overrides);
   if (!fallbackSlot || fallbackSlot.name === primarySlot.name) return primary;
 
-  return createResilientLlmProvider(primary, fallbackSlot.create(env), createCircuitBreaker());
+  return createResilientLlmProvider(primary, fallbackSlot.create(env, overrides), createCircuitBreaker());
 }
