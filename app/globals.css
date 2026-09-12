@@ -1,1 +1,68 @@
 @import "tailwindcss";
+
+/**
+ * Tokens da identidade visual — docs/identidade-visual.md.
+ *
+ * As três primeiras cores foram amostradas do logo (docs/images/); o resto é derivado delas, e
+ * todo contraste está medido no documento. Duas regras que o CSS sozinho não consegue impor:
+ *
+ * 1. `brand-green` NÃO é cor de texto (3,54:1 sobre cream, 3,92:1 sobre navy — reprova em AA).
+ *    Para texto existem `green-ink` (claro) e `green-light` (escuro).
+ * 2. `stance-*` classifica posição jurídica e é CATEGÓRICA, nunca uma escala de aprovação — o
+ *    produto é proibido de sugerir êxito (§3.10/HU-29). As três têm luminância pareada de
+ *    propósito (~1,05:1 entre si), então cor nunca identifica classificação sozinha: sempre
+ *    acompanhada de rótulo textual e forma.
+ */
+@theme {
+  --color-brand-navy: #10243d;
+  --color-brand-cream: #f4f1ea;
+  --color-brand-green: #0e9165;
+  --color-green-ink: #0b6e4d;
+  --color-green-light: #2dd4a0;
+
+  --color-ink-900: #10243d;
+  --color-ink-800: #22344b;
+  --color-ink-700: #39495c;
+  --color-ink-600: #5e6a78;
+  --color-ink-500: #828a94;
+  --color-ink-400: #a6abaf;
+  --color-ink-300: #c6c8c7;
+  --color-ink-200: #dddcd9;
+  --color-ink-100: #ebe9e3;
+  --color-ink-050: #f4f1ea;
+
+  --color-stance-supports: #1a5694;
+  --color-stance-opposes: #5b4394;
+  --color-stance-mixed: #14636b;
+  --color-stance-supports-dark: #93c5fd;
+  --color-stance-opposes-dark: #c4b5fd;
+  --color-stance-mixed-dark: #7dd3dc;
+
+  --color-danger: #b4341f;
+  --color-danger-dark: #fca5a5;
+  --color-warn: #92400e;
+  --color-warn-dark: #fbbf7a;
+}
+
+/**
+ * Fundo e tinta da página. Antes disto o `body` não tinha cor definida: os componentes já traziam
+ * variantes `dark:`, mas a página seguia branca nos dois temas, então o tema escuro existia pela
+ * metade. Aqui ele passa a valer de fato.
+ */
+@layer base {
+  :root {
+    color-scheme: light dark;
+  }
+
+  body {
+    background-color: var(--color-brand-cream);
+    color: var(--color-ink-900);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    body {
+      background-color: var(--color-brand-navy);
+      color: var(--color-ink-050);
+    }
+  }
+}

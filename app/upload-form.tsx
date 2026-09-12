@@ -94,12 +94,12 @@ export function UploadForm() {
           type="file"
           accept=".pdf,.docx,.txt"
           onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-          className="rounded-lg border border-neutral-300 p-2 text-sm dark:border-neutral-700"
+          className="rounded-lg border border-ink-500 bg-ink-100 p-2 text-sm text-ink-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-green dark:border-ink-500 dark:bg-ink-800 dark:text-ink-050"
         />
         <button
           type="submit"
           disabled={!file || isSubmitting}
-          className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
+          className="rounded-lg bg-brand-navy px-4 py-2 text-sm font-medium text-brand-cream focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-green disabled:opacity-40 dark:bg-ink-050 dark:text-brand-navy"
         >
           {isSubmitting ? "Processando..." : "Enviar documento"}
         </button>
@@ -120,33 +120,33 @@ export function UploadForm() {
       )}
 
       {errorMessage && (
-        <p className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-700 dark:bg-red-950 dark:text-red-200">
+        <p className="rounded-lg border border-danger bg-ink-100 p-3 text-sm text-danger dark:border-danger-dark dark:bg-ink-800 dark:text-danger-dark">
           {errorMessage}
         </p>
       )}
 
       {result && (
         <>
-          <div className="rounded-lg border border-neutral-300 p-4 text-sm dark:border-neutral-700">
+          <div className="rounded-lg border border-ink-300 p-4 text-sm dark:border-ink-700">
             <p className="font-medium">Documento processado</p>
-            <p className="mt-1 text-neutral-500">
+            <p className="mt-1 text-ink-600 dark:text-ink-400">
               {result.fileName} · {result.metadata.pageCount ? `${result.metadata.pageCount} página(s)` : ""}
             </p>
             {result.provider && (
-              <p className="mt-2 text-xs text-neutral-500">
+              <p className="mt-2 text-xs text-ink-600 dark:text-ink-400">
                 Execução {result.runId} · {result.provider.llm}/{result.provider.model} · jurisprudência{" "}
                 {result.provider.jurisprudence}
               </p>
             )}
             {result.scratchpads && (
-              <p className="mt-1 text-xs text-neutral-500">
+              <p className="mt-1 text-xs text-ink-600 dark:text-ink-400">
                 Scratchpads: {result.scratchpads.processed}/{result.scratchpads.requested}
                 {result.scratchpads.failed > 0 ? ` · ${result.scratchpads.failed} falha(s)` : ""}
               </p>
             )}
             {result.redactions.length > 0 && (
               <div className="mt-3">
-                <p className="text-neutral-500">Dados pessoais mascarados antes da análise:</p>
+                <p className="text-ink-600 dark:text-ink-400">Dados pessoais mascarados antes da análise:</p>
                 <ul className="mt-1 list-disc pl-5">
                   {result.redactions.map((r) => (
                     <li key={`${r.type}-${r.marker}`}>
@@ -157,8 +157,8 @@ export function UploadForm() {
               </div>
             )}
             <details className="mt-3">
-              <summary className="cursor-pointer text-neutral-500">Ver prévia do texto sanitizado</summary>
-              <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-xs text-neutral-600 dark:text-neutral-400">
+              <summary className="cursor-pointer text-ink-600 dark:text-ink-400">Ver prévia do texto sanitizado</summary>
+              <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-xs text-ink-600 dark:text-ink-400">
                 {result.sanitizedTextPreview}
               </pre>
             </details>
@@ -171,12 +171,22 @@ export function UploadForm() {
   );
 }
 
+/**
+ * Estado OPERACIONAL da etapa (§11.9) — aqui verde/vermelho são legítimos, porque descrevem a
+ * execução, não resultado jurídico (docs/identidade-visual.md §5).
+ *
+ * O rótulo ao lado nomeia a etapa, mas não diz se ela terminou: sem o preenchimento vs. contorno e
+ * sem o texto acessível, "concluída" e "pendente" seriam a mesma bolinha em escala de cinza e no
+ * leitor de tela.
+ */
 function StatusDot({ status }: { status: "COMPLETED" | "FAILED" | undefined }) {
-  const color =
+  const { shape, label } =
     status === "COMPLETED"
-      ? "bg-emerald-500"
+      ? { shape: "bg-green-ink dark:bg-green-light", label: "concluída" }
       : status === "FAILED"
-        ? "bg-red-500"
-        : "bg-neutral-300 dark:bg-neutral-600";
-  return <span className={`h-2 w-2 rounded-full ${color}`} />;
+        ? { shape: "bg-danger dark:bg-danger-dark", label: "falhou" }
+        : { shape: "border-2 border-ink-500", label: "pendente" };
+  return (
+    <span role="img" aria-label={label} className={`h-2.5 w-2.5 shrink-0 rounded-full ${shape}`} />
+  );
 }

@@ -12,7 +12,8 @@ de chegar à tela.
 Documentação: [`contexto-geral.md`](contexto-geral.md) (arquitetura e decisões),
 [`historias-usuario/`](historias-usuario/) (38 HUs em 12 épicos),
 [`docs/escopo.md`](docs/escopo.md) (escopo e não-objetivos),
-[`docs/modelo-de-dados.md`](docs/modelo-de-dados.md) (as 11 tabelas de §11.8) e
+[`docs/modelo-de-dados.md`](docs/modelo-de-dados.md) (as 11 tabelas de §11.8),
+[`docs/identidade-visual.md`](docs/identidade-visual.md) (paleta, tipografia e tokens da UI) e
 [`CLAUDE.md`](CLAUDE.md) (ordem de implementação por fases).
 
 ## Como funciona: Map → Reduce → Verify

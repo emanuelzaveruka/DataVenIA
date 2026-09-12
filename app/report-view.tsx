@@ -18,16 +18,34 @@ const CLASSIFICATION_LABELS: Record<IssueClassification, string> = {
 /**
  * A cor nunca é o único portador do significado (o rótulo textual vem junto), para que a
  * classificação continue legível em leitor de tela e em daltonismo.
+ *
+ * A paleta é CATEGÓRICA, não uma escala de aprovação (docs/identidade-visual.md §4): verde para
+ * favorável e vermelho para contrário diriam "você ganha / você perde" por baixo do texto, que é
+ * exatamente o juízo de êxito proibido por §3.10/HU-29 — e, sendo o verde a cor da marca, faria a
+ * identidade torcer por um lado. Azul, roxo e teal não carregam essa valência, e ficam fora do
+ * vermelho/âmbar reservado a estado de sistema: precedente contrário não é defeito da aplicação.
+ *
+ * As três têm luminância pareada de propósito (~1,05:1 entre si), para que nenhuma pese mais que
+ * as outras. O efeito colateral é que em escala de cinza elas são indistinguíveis — por isso
+ * CLASSIFICATION_SHAPES não é decoração: é o que sustenta a regra quando a cor não chega.
  */
 const CLASSIFICATION_STYLES: Record<IssueClassification, string> = {
   TENDENCIA_FAVORAVEL:
-    "border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-200",
+    "border-stance-supports bg-ink-100 text-stance-supports dark:border-stance-supports-dark dark:bg-ink-800 dark:text-stance-supports-dark",
   TENDENCIA_CONTRARIA:
-    "border-red-300 bg-red-50 text-red-900 dark:border-red-700 dark:bg-red-950 dark:text-red-200",
+    "border-stance-opposes bg-ink-100 text-stance-opposes dark:border-stance-opposes-dark dark:bg-ink-800 dark:text-stance-opposes-dark",
   JURISPRUDENCIA_DIVIDIDA:
-    "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200",
+    "border-stance-mixed bg-ink-100 text-stance-mixed dark:border-stance-mixed-dark dark:bg-ink-800 dark:text-stance-mixed-dark",
   INDETERMINADA:
-    "border-neutral-300 bg-neutral-100 text-neutral-700 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300",
+    "border-ink-500 bg-ink-100 text-ink-600 dark:border-ink-500 dark:bg-ink-800 dark:text-ink-400",
+};
+
+/** Segundo portador do significado, junto do rótulo textual. `aria-hidden`: o rótulo já diz. */
+const CLASSIFICATION_SHAPES: Record<IssueClassification, string> = {
+  TENDENCIA_FAVORAVEL: "\u25CF",
+  TENDENCIA_CONTRARIA: "\u25A0",
+  JURISPRUDENCIA_DIVIDIDA: "\u25C6",
+  INDETERMINADA: "\u25CB",
 };
 
 const CONVERGENCE_LABELS: Record<string, string> = {
@@ -74,38 +92,39 @@ function IssueSection({ issue }: { issue: ReportIssue }) {
   return (
     <section
       aria-labelledby={`questao-${issue.legalIssueId}`}
-      className="rounded-lg border border-neutral-300 p-4 dark:border-neutral-700"
+      className="rounded-lg border border-ink-300 p-4 dark:border-ink-700"
     >
       <header className="flex flex-col gap-2">
         <h3 id={`questao-${issue.legalIssueId}`} className="text-base font-semibold">
           {issue.topic}
         </h3>
-        <p className="text-sm text-neutral-500">{issue.question}</p>
+        <p className="text-sm text-ink-600 dark:text-ink-400">{issue.question}</p>
         <p
-          className={`w-fit rounded-full border px-3 py-1 text-xs font-medium ${CLASSIFICATION_STYLES[issue.classification]}`}
+          className={`flex w-fit items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${CLASSIFICATION_STYLES[issue.classification]}`}
         >
+          <span aria-hidden="true">{CLASSIFICATION_SHAPES[issue.classification]}</span>
           {CLASSIFICATION_LABELS[issue.classification]}
         </p>
-        <p className="text-xs text-neutral-500">{issue.classificationReason}</p>
+        <p className="text-xs text-ink-600 dark:text-ink-400">{issue.classificationReason}</p>
       </header>
 
-      <div className="mt-4 rounded-md bg-neutral-100 p-3 text-sm dark:bg-neutral-900">
+      <div className="mt-4 rounded-md border border-ink-300 bg-ink-100 p-3 text-sm dark:border-ink-700 dark:bg-ink-800">
         <p className="font-medium">Tendência jurisprudencial</p>
         <p className="mt-1">{issue.trend.summary}</p>
-        <p className="mt-1 text-neutral-500">
+        <p className="mt-1 text-ink-600 dark:text-ink-400">
           Leitura: {CONVERGENCE_LABELS[issue.trend.convergence] ?? issue.trend.convergence}.
         </p>
       </div>
 
       {issue.conclusion && <p className="mt-4 text-sm">{issue.conclusion}</p>}
       {issue.conclusionBlockedReason && (
-        <p className="mt-4 rounded-md border border-amber-300 p-3 text-sm text-amber-900 dark:border-amber-700 dark:text-amber-200">
+        <p className="mt-4 rounded-md border border-warn p-3 text-sm text-warn dark:border-warn-dark dark:text-warn-dark">
           {issue.conclusionBlockedReason}
         </p>
       )}
 
       {issue.chamberPattern && (
-        <p className="mt-3 text-sm text-neutral-500">Padrão do órgão julgador: {issue.chamberPattern}</p>
+        <p className="mt-3 text-sm text-ink-600 dark:text-ink-400">Padrão do órgão julgador: {issue.chamberPattern}</p>
       )}
 
       <BulletList title="Fatores recorrentes" items={issue.recurringFactors} />
@@ -151,19 +170,19 @@ function PrecedentSection({
       <h4 className="text-sm font-semibold">{title}</h4>
       {items.length === 0 ? (
         // HU-22: a seção nunca some — a ausência é declarada.
-        <p className="mt-2 text-sm text-neutral-500">{notice}</p>
+        <p className="mt-2 text-sm text-ink-600 dark:text-ink-400">{notice}</p>
       ) : (
         <ul className="mt-2 flex flex-col gap-3">
           {items.map((item) => (
             <li
               key={item.evidenceId}
-              className="rounded-md border border-neutral-200 p-3 text-sm dark:border-neutral-800"
+              className="rounded-md border border-ink-300 p-3 text-sm dark:border-ink-700"
             >
               <p className="font-medium">{item.argument}</p>
-              <blockquote className="mt-2 border-l-2 border-neutral-300 pl-3 text-neutral-600 dark:border-neutral-600 dark:text-neutral-400">
+              <blockquote className="mt-2 border-l-2 border-ink-500 pl-3 text-ink-600 dark:border-ink-500 dark:text-ink-400">
                 “{item.quote}”
               </blockquote>
-              <p className="mt-1 text-xs text-neutral-500">{item.context}</p>
+              <p className="mt-1 text-xs text-ink-600 dark:text-ink-400">{item.context}</p>
               <SourceLine source={item.source} />
             </li>
           ))}
@@ -203,13 +222,13 @@ function ClaimSection({ title, claims }: { title: string; claims: ReportClaim[] 
  */
 function SourceLine({ source }: { source: ReportSource }) {
   return (
-    <span className="mt-1 block text-xs text-neutral-500">
+    <span className="mt-1 block text-xs text-ink-600 dark:text-ink-400">
       {source.processNumber} · {source.chamber} · {source.judge} · {source.judgmentDate} ·{" "}
       <a
         href={source.url}
         target="_blank"
         rel="noreferrer noopener"
-        className="underline underline-offset-2 hover:text-neutral-900 dark:hover:text-neutral-100"
+        className="underline underline-offset-2 hover:text-ink-900 dark:hover:text-ink-050"
       >
         Abrir decisão no portal do TJPR
       </a>
@@ -219,7 +238,7 @@ function SourceLine({ source }: { source: ReportSource }) {
 
 function ReportFooter({ report }: { report: FinalReport }) {
   return (
-    <footer className="flex flex-col gap-3 border-t border-neutral-200 pt-4 text-xs text-neutral-500 dark:border-neutral-800">
+    <footer className="flex flex-col gap-3 border-t border-ink-300 pt-4 text-xs text-ink-600 dark:border-ink-700 dark:text-ink-400">
       <p>
         {report.sample.analyzedDecisions} decisão(ões) analisada(s) em profundidade ·{" "}
         {report.sample.verifiedEvidence} citação(ões) conferida(s) na fonte original ·{" "}
@@ -249,7 +268,7 @@ function Field({ label, value }: { label: string; value?: string }) {
   if (!value) return null;
   return (
     <div className="flex gap-2">
-      <dt className="text-neutral-500">{label}:</dt>
+      <dt className="text-ink-600 dark:text-ink-400">{label}:</dt>
       <dd>{value}</dd>
     </div>
   );

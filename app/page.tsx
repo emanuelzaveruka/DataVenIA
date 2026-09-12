@@ -7,7 +7,7 @@ export default function Home() {
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-6 px-4 py-12">
       <header className="text-center">
         <h1 className="text-3xl font-semibold">JurisFlow</h1>
-        <p className="mt-2 text-sm text-neutral-500">
+        <p className="mt-2 text-sm text-ink-600 dark:text-ink-400">
           Envie uma petição, decisão, recurso ou manifestação em PDF, DOCX ou TXT para iniciar a
           pesquisa de jurisprudência do TJPR.
         </p>
@@ -17,7 +17,7 @@ export default function Home() {
       <PrivacyNotice />
       <UploadForm />
 
-      <p className="text-center text-xs text-neutral-400">
+      <p className="text-center text-xs text-ink-600 dark:text-ink-400">
         <Link href="/relatorio-demo" className="underline underline-offset-2">
           Ver um relatório de exemplo
         </Link>{" "}
@@ -29,7 +29,7 @@ export default function Home() {
 
 function PrivacyNotice() {
   return (
-    <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+    <div className="rounded-lg border border-ink-300 border-l-4 border-l-ink-500 bg-ink-100 p-4 text-sm text-ink-900 dark:border-ink-700 dark:border-l-ink-500 dark:bg-ink-800 dark:text-ink-050">
       <p className="font-medium">Antes de enviar, saiba como tratamos seus dados:</p>
       <ul className="mt-2 list-disc space-y-1 pl-5">
         <li>

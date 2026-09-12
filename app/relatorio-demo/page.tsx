@@ -16,18 +16,18 @@ export default async function ReportDemoPage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-12">
       <header className="flex flex-col gap-2">
-        <Link href="/" className="text-sm text-neutral-500 underline underline-offset-2">
+        <Link href="/" className="text-sm text-ink-600 underline underline-offset-2 dark:text-ink-400">
           ← Voltar ao envio de documento
         </Link>
         <h1 className="text-2xl font-semibold">Relatório de pesquisa jurisprudencial</h1>
-        <p className="text-sm text-neutral-500">
+        <p className="text-sm text-ink-600 dark:text-ink-400">
           Demonstração com jurisprudência fictícia versionada — nenhum dado corresponde a processo
           ou pessoa real.
         </p>
       </header>
 
       {result.isError ? (
-        <p className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-700 dark:bg-red-950 dark:text-red-200">
+        <p className="rounded-lg border border-danger bg-ink-100 p-3 text-sm text-danger dark:border-danger-dark dark:bg-ink-800 dark:text-danger-dark">
           {result.error.userMessage ?? result.error.description}
         </p>
       ) : (
