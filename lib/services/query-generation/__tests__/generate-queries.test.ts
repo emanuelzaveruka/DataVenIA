@@ -12,7 +12,7 @@ function fakeProviderFromRawResponses(rawResponses: unknown[]): LlmProvider {
     return parseStructuredOutput(params.schema, params.schemaName, raw, "fake");
   }) as unknown as LlmProvider["generateStructured"];
 
-  return { name: "fake", generateStructured };
+  return { name: "fake", model: "fake-model", generateStructured };
 }
 
 const caseAnalysis: CaseAnalysis = {

@@ -80,10 +80,116 @@ jurisprudência roda em modo fixture.
   precisa, então a distinção `RawDecision`/`Decision` seguiu sem necessidade concreta. Como nas
   Fases 3/4, o serviço foi construído e testado isoladamente — ainda não wireado em
   `app/api/documents/route.ts`.
-- **Fase 6 — Cross-File Analysis e Evidence Verification**: HU-21 → HU-22 → HU-23 → HU-24 → HU-25.
-- **Fase 7 — Relatório final e UX**: HU-26 → HU-27 → HU-28 → HU-29.
-- **Fase 8 — Persistência real, idempotência, observabilidade**: cria-se o projeto Supabase/Postgres
-  aqui. HU-34 → HU-33 → HU-35, revisitando HU-30/HU-31/HU-32 com storage real.
+- **Fase 6 — Cross-File Analysis e Evidence Verification** ✅ concluída. Contrato `CrossFileAnalysis`
+  (`lib/schemas/cross-file.schema.ts`, §3.8) e `VerifiedEvidence` (`lib/schemas/evidence.schema.ts`,
+  §3.9). **Decisão central**: a integridade referencial do cross-file não é um filtro pós-resposta —
+  `buildCrossFileAnalysisResponseSchema()` fecha o schema de saída sobre os IDs reais daquela
+  execução (legalIssueIds/scratchpadIds/evidenceIds), então `scratchpadId`/`evidenceId` inventado
+  (HU-21), questão jurídica sem análise ou analisada duas vezes, conclusão sem nenhuma decisão real,
+  `strongest*` fora das listas correspondentes, risco/argumento sem `evidenceIds` (HU-23/HU-25) e
+  omissão de contrários quando a amostra tem holdings OPPOSES/MIXED (HU-22) viram falha de
+  structured output — e, por isso, entram de graça no retry com contexto do erro de
+  `generateStructuredWithRetry` (§11.7) em vez de serem descartados em silêncio.
+  `lib/services/cross-file/analyze-cross-file.ts` só enxerga Scratchpads `VALID` + `CaseAnalysis`
+  (REDUCE do §2.3 — nunca texto original), e deriva `opposingPrecedentsFound` em código para HU-22
+  ("nenhum precedente contrário identificado na amostra" é um fato sobre a amostra, não algo a
+  perguntar ao modelo). `lib/services/evidence/` é a etapa VERIFY e **não usa modelo nenhum**:
+  `quote-matching.ts` compara de forma determinística (literal → supressões `[...]` em ordem →
+  near-literal por janela deslizante de tokens acima de `QUOTE_MATCH_MIN_SIMILARITY`, novo em
+  `limits.ts`), `select-evidence-targets.ts` escolhe quais decisões reabrir dentro de
+  `FINAL_EVIDENCE_LIMIT` priorizando as que sustentam riscos/argumentos (sem elas HU-25 esvaziaria o
+  relatório), e `verify-evidence.ts` reabre via `fetchDecision`, recomputa o `sourceHash` e compara
+  com o do Scratchpad (§11.8): fonte alterada sai como `SOURCE_CHANGED`/`verified: false` +
+  `staleScratchpadIds`, porque reprocessar é refazer o MAP e VERIFY não decide isso. `matchKind` e
+  `similarity` são extensões de auditoria sobre o contrato de §3.9 — nenhum `verified: false` fica
+  sem motivo explícito. `enforce-evidence-policy.ts` é a regra anti-alucinação de HU-25: remove
+  risco/argumento sem `VerifiedEvidence`, poda `evidenceIds` reprovados e derruba `strongest*` sem
+  citação verificada, mas **preserva de propósito** `supportingDecisions`/`opposingDecisions`/
+  `mixedDecisions` — são a contagem da amostra ("6 de 10 decisões sustentam a tese", §3.10), não
+  citação apresentada como fundamento. Como nas Fases 3/4/5, tudo testado isoladamente (incluindo um
+  teste de ponta a ponta sobre a fixture versionada, critério 16) e ainda não wireado em
+  `app/api/documents/route.ts`.
+- **Fase 7 — Relatório final e UX** ✅ concluída. Contrato `FinalReport`
+  (`lib/schemas/report.schema.ts`, §3.10) e `lib/services/report/`. **Decisão central**: o relatório
+  é montado **sem nenhuma chamada de modelo**. Depois da Fase 6 todo campo do §3.10 já existe
+  estruturado (`CaseAnalysis`, `CrossFileAnalysis` filtrado por `enforceEvidencePolicy`,
+  `VerifiedEvidence`), e uma última passada de LLM aqui seria exatamente a chance de reintroduzir
+  alucinação no ponto em que §3.9 acabou de eliminá-la. O preço aceito é que o relatório não tem
+  prosa redigida — tem estrutura rastreável, que é o que HU-27/§14 pedem. `buildReport()` reaplica a
+  regra de HU-25 na camada de exibição, de forma idempotente: sobre entrada já filtrada não remove
+  nada, mas a garantia anti-alucinação deixa de depender da disciplina de quem chama.
+  `trend.ts` produz a tendência só em contagem absoluta ("6 de 10 decisões analisadas sustentam a
+  tese, 3 contrárias, 1 mista") + rótulo qualitativo (`ALTA`/`MODERADA`/`DIVIDIDA`/
+  `AMOSTRA_INSUFICIENTE`); os limiares moram em `limits.ts` e **nunca** são exibidos, porque §3.10
+  proíbe expor score interno como probabilidade. `forbidden-metrics.ts` fecha o buraco que o prompt
+  sozinho não fecha: `conclusion`, riscos e argumentos são texto livre escrito pelo modelo no
+  cross-file, então um "83% de chance de ganhar" é bloqueado estruturalmente na última etapa antes
+  da tela — mas um percentual sozinho ("reajuste de 30%") continua passando, senão o filtro comeria
+  conteúdo jurídico legítimo. HU-29 é classificação de primeira classe (`INDETERMINADA`) com motivo
+  explícito, e nenhum caminho força um lado: amostra pequena ou nada verificado → `INDETERMINADA`;
+  empate → `JURISPRUDENCIA_DIVIDIDA`. HU-27 vira `ReportSource` com todos os campos obrigatórios +
+  `isOfficialTjprUrl` (novo `lib/config/official-sources.ts`, §7.1 host allowlist): item sem Câmara/
+  relator/data ou com URL fora do portal oficial é bloqueado **individualmente** e registrado em
+  `report.omissions` — o relatório inteiro nunca cai junto, e §14 continua respondível ("por que
+  isso não aparece"). HU-22 ganhou duas mensagens distintas em vez de uma: "nenhum precedente
+  contrário identificado na amostra" só é dito quando a amostra realmente não tinha contrários; se
+  tinha mas nenhum trecho verificou, o texto diz isso. UI: `app/research-disclaimer.tsx` (HU-28 —
+  sem botão de fechar e sem estado de propósito, a validação da HU exige que não seja dispensável)
+  aparece no upload e duas vezes no resultado; `app/report-view.tsx` renderiza o `FinalReport` com
+  heading semântico, cor nunca como único portador de significado e provenance visível ao lado do
+  link; `app/relatorio-demo/` roda Fases 6+7 de verdade sobre a fixture versionada
+  (`lib/providers/fixtures/demo-report.ts`, sem rede e sem modelo — critério 16) e é onde os
+  critérios de aceite de HU-26/27/28 se conferem no navegador. **Segue não wireado** em
+  `app/api/documents/route.ts`: ligar o pipeline completo exige `getLlmProvider()` com credencial
+  real e orquestração de ponta a ponta, o que nenhuma HU desta fase pede — é Fase 8/10, e o padrão
+  das Fases 3–6 (serviço isolado e testado) foi mantido de propósito.
+- **Fase 8 — Persistência real, idempotência, observabilidade** ✅ concluída (código; o
+  provisionamento do banco é ação do usuário). Modelo de dados de §11.8 em
+  `supabase/migrations/0001_initial_schema.sql` (11 tabelas, JSONB para os payloads de domínio,
+  instruções em `supabase/README.md`), contratos em `lib/schemas/persistence.schema.ts`.
+  **Decisão central**: storage entra pela mesma porta que LLM e jurisprudência —
+  `JurisFlowRepository` (`lib/persistence/repository.ts`) com duas implementações,
+  `in-memory-repository.ts` e `supabase-repository.ts`, escolhidas por `getRepository()`. O
+  repositório em memória **não é andaime**: é o que mantém o critério de aceite 16 (aplicação
+  completa sem conectividade) valendo depois da Fase 8, e por isso a ausência de `SUPABASE_URL` +
+  `SUPABASE_SERVICE_ROLE_KEY` é modo de operação legítimo — só *meia* configuração é recusada, para
+  não degradar em silêncio. O adaptador Supabase fala PostgREST via **fetch puro, sem SDK** (mesma
+  decisão de §15 para os providers de modelo): nenhuma dependência nova, `fetch` injetável, o
+  repositório inteiro testado sem rede. Toda linha lida do banco é revalidada pelo schema antes de
+  virar objeto de domínio — §11.7 aplicado ao storage, porque dado que entrou por outro caminho
+  (migration antiga, escrita manual) não é confiável só por estar no banco. HU-33: chave de
+  idempotência `SHA256(decisionId + promptVersion + pipelineVersion + modelVersion)`
+  (`lib/persistence/idempotency.ts`, versões em `lib/config/versions.ts`); `ScratchpadCache` entra
+  em `generateScratchpad` como parâmetro opcional com default no-op, então Fases 5–7 seguem
+  idênticas sem cache. Duas regras não óbvias do cache: só serve Scratchpad `VALID` (reusar um
+  PARTIAL congelaria permanentemente uma análise que o MAP declarou não confiável, e o gate de
+  HU-19 passaria a contar resultado ruim como resultado) e a consulta vem **antes** do fetch e do
+  modelo. `LlmProvider` ganhou `model` obrigatório — sem ele, dois modelos do mesmo provider
+  compartilhariam chave de cache, que é exatamente o reuso silencioso que HU-33 proíbe.
+  `createCachedJurisprudenceProvider` implementa o cache de decisão bruta de §11.8 e expõe
+  `fresh`: **Evidence Verification tem de receber `provider.fresh`**, porque servir a decisão pelo
+  cache faria HU-24 comparar o cache com ele mesmo e a detecção de "fonte mudou desde a coleta"
+  nunca dispararia — `fresh` tem nome próprio justamente para isso não virar comentário pedindo
+  cuidado (há teste cobrindo o cenário). `search` nunca é cacheada: o acervo do tribunal muda.
+  HU-35: `lib/observability/execution-recorder.ts` (um `ToolExecutionLog` por chamada, `attempt`
+  contado por tool, `traceId`/`workflowId` sempre vindos do recorder — a validação da HU) e
+  `pipeline-progress.ts` (as contagens etapa a etapa de §11.9, como função pura sobre artefatos, em
+  vez de um observador acoplado ao pipeline); telemetria falha em silêncio de propósito, porque
+  perder observabilidade é ruim mas derrubar a análise do usuário por causa disso é pior.
+  Revisita das transversais **sem reescrever o que já funcionava**: `postToolUse` finalmente cumpre
+  o "registra telemetria" de HU-31 (recorder opcional em vez de `console.error` que ninguém
+  consulta); `state-machine.ts` passou a exportar `WORKFLOW_STAGES`/`WORKFLOW_STATUSES` como
+  `const` (a migration valida as colunas contra a mesma lista) e `STAGE_ORDER` agora deriva delas
+  em vez de repetir a sequência; HU-32 aparece nos erros de persistência, que entram no
+  classificador central (503 retryable, 401 não). `app/api/documents/route.ts` foi migrado para o
+  repositório + recorder e cria `runId`/`traceId` por requisição;
+  `lib/store/in-memory-document-store.ts` foi removido (era o placeholder que esta fase substitui).
+  HU-06 é estrutural: `deleteRun` é um `DELETE` único em `analysis_runs` com `ON DELETE CASCADE`, e
+  `jurisprudence_decisions` fica fora da cascata de propósito — jurisprudência pública é o único
+  dado que a HU autoriza reter. **Fora do escopo desta fase**: nenhum recurso externo foi
+  provisionado (a conta é do usuário: criar o projeto, aplicar a migration e definir as variáveis é
+  ação dele) e o pipeline das Fases 3–7 **segue não wireado** na rota, que persiste apenas a
+  ingestão — ligar ponta a ponta exige credencial de modelo real e é Fase 10.
 - **Fase 9 — Integração real TJPR**: condicional ao resultado da inspeção manual da Fase 0/HU-38. Se o
   portal não permitir (login/CAPTCHA/rate limit/termos), o produto permanece em fixture
   permanentemente.

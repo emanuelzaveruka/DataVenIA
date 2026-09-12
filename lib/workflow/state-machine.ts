@@ -1,28 +1,37 @@
 import { MIN_VALID_SCRATCHPADS } from "../config/limits";
 
-export type WorkflowStage =
-  | "DOCUMENT_ANALYSIS"
-  | "QUERY_GENERATION"
-  | "SEARCH"
-  | "SCRATCHPAD_GENERATION"
-  | "CROSS_FILE_ANALYSIS"
-  | "EVIDENCE_VERIFICATION"
-  | "REPORT_GENERATION";
+/**
+ * Estágios e status são `const` (e não só `type`) desde a Fase 8: a persistência de §11.8 valida a
+ * coluna contra exatamente esta lista, então ela precisa existir em runtime. A ordem do array é a
+ * ordem do pipeline — `STAGE_ORDER` abaixo deriva dela, em vez de repetir a sequência.
+ */
+export const WORKFLOW_STAGES = [
+  "DOCUMENT_ANALYSIS",
+  "QUERY_GENERATION",
+  "SEARCH",
+  "SCRATCHPAD_GENERATION",
+  "CROSS_FILE_ANALYSIS",
+  "EVIDENCE_VERIFICATION",
+  "REPORT_GENERATION",
+] as const;
+export type WorkflowStage = (typeof WORKFLOW_STAGES)[number];
 
-export type WorkflowStatus =
-  | "UPLOADED"
-  | "DOCUMENT_PARSED"
-  | "CASE_ANALYZED"
-  | "QUERIES_GENERATED"
-  | "SEARCH_COMPLETE"
-  | "DECISIONS_SELECTED"
-  | "SCRATCHPADS_COMPLETE"
-  | "CROSSFILE_COMPLETE"
-  | "EVIDENCE_VERIFIED"
-  | "REPORT_COMPLETE"
-  | "PARTIAL_SUCCESS"
-  | "FAILED"
-  | "CANCELLED";
+export const WORKFLOW_STATUSES = [
+  "UPLOADED",
+  "DOCUMENT_PARSED",
+  "CASE_ANALYZED",
+  "QUERIES_GENERATED",
+  "SEARCH_COMPLETE",
+  "DECISIONS_SELECTED",
+  "SCRATCHPADS_COMPLETE",
+  "CROSSFILE_COMPLETE",
+  "EVIDENCE_VERIFIED",
+  "REPORT_COMPLETE",
+  "PARTIAL_SUCCESS",
+  "FAILED",
+  "CANCELLED",
+] as const;
+export type WorkflowStatus = (typeof WORKFLOW_STATUSES)[number];
 
 export interface WorkflowError {
   code: "INVALID_STAGE";
@@ -31,15 +40,7 @@ export interface WorkflowError {
   attemptedStage: WorkflowStage;
 }
 
-const STAGE_ORDER: readonly WorkflowStage[] = [
-  "DOCUMENT_ANALYSIS",
-  "QUERY_GENERATION",
-  "SEARCH",
-  "SCRATCHPAD_GENERATION",
-  "CROSS_FILE_ANALYSIS",
-  "EVIDENCE_VERIFICATION",
-  "REPORT_GENERATION",
-];
+const STAGE_ORDER: readonly WorkflowStage[] = WORKFLOW_STAGES;
 
 export interface WorkflowGuardContext {
   minValidScratchpads: number;

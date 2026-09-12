@@ -6,6 +6,7 @@ import { createAppError, type AppError } from "../../errors/app-error";
 import { toolFailure, toolSuccess, type ToolResult } from "../../errors/tool-result";
 import { SCRATCHPAD_CONCURRENCY } from "../../config/limits";
 import { runWithConcurrencyLimit } from "../../concurrency/run-with-concurrency-limit";
+import { NO_SCRATCHPAD_CACHE, type ScratchpadCache } from "../../persistence/scratchpad-cache";
 import { generateScratchpad } from "./generate-scratchpad";
 
 export type ScratchpadBatchStatus = "SUCCESS" | "PARTIAL_SUCCESS";
@@ -38,6 +39,7 @@ export async function generateScratchpads(
   provider: LlmProvider,
   jurisprudenceProvider: JurisprudenceProvider,
   concurrency: number = SCRATCHPAD_CONCURRENCY,
+  cache: ScratchpadCache = NO_SCRATCHPAD_CACHE,
 ): Promise<ToolResult<ScratchpadBatchResult>> {
   if (candidates.length === 0) {
     return toolFailure(
@@ -54,7 +56,7 @@ export async function generateScratchpads(
 
   const outcomes = await runWithConcurrencyLimit(
     candidates,
-    (candidate) => generateScratchpad(candidate, provider, jurisprudenceProvider),
+    (candidate) => generateScratchpad(candidate, provider, jurisprudenceProvider, cache),
     concurrency,
   );
 

@@ -28,6 +28,7 @@ export function createOpenAiProvider(config: OpenAiProviderConfig): LlmProvider 
 
   return {
     name: "openai",
+    model,
     async generateStructured<T>(params: GenerateStructuredParams<T>): Promise<ToolResult<T>> {
       const jsonSchema = z.toJSONSchema(params.schema, { target: "draft-7" });
       const systemWithSchema = `${params.system}

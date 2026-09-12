@@ -14,7 +14,7 @@ function fakeProviderFromRawResponses(rawResponses: unknown[]): LlmProvider {
     return parseStructuredOutput(params.schema, params.schemaName, raw, "fake");
   }) as unknown as LlmProvider["generateStructured"];
 
-  return { name: "fake", generateStructured };
+  return { name: "fake", model: "fake-model", generateStructured };
 }
 
 describe("generateStructuredWithRetry", () => {
@@ -68,6 +68,7 @@ describe("generateStructuredWithRetry", () => {
   it("does not retry a non-retryable error category", async () => {
     const provider: LlmProvider = {
       name: "fake",
+      model: "fake-model",
       generateStructured: vi.fn(async () =>
         Promise.resolve({
           isError: true as const,

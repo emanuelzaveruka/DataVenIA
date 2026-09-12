@@ -26,7 +26,7 @@ function fakeProviderKeyedById(responsesById: Record<string, unknown[]>): LlmPro
     return parseStructuredOutput(params.schema, params.schemaName, responsesById[id]![i], "fake");
   }) as unknown as LlmProvider["generateStructured"];
 
-  return { name: "fake", generateStructured };
+  return { name: "fake", model: "fake-model", generateStructured };
 }
 
 function fakeJurisprudenceProvider(

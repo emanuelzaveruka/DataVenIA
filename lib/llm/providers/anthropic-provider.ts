@@ -42,6 +42,7 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): LlmPro
 
   return {
     name: "anthropic",
+    model,
     async generateStructured<T>(params: GenerateStructuredParams<T>): Promise<ToolResult<T>> {
       const jsonSchema = z.toJSONSchema(params.schema, { target: "draft-7" });
 

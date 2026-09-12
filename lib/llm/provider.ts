@@ -16,5 +16,11 @@ export interface GenerateStructuredParams<T> {
  */
 export interface LlmProvider {
   readonly name: string;
+  /**
+   * Modelo concreto por trás do provider. É obrigatório (e não derivável de `name`) porque entra
+   * na chave de idempotência de HU-33/§11.6: dois modelos do mesmo provider produzem resultados
+   * diferentes, e um cache que os confundisse reusaria silenciosamente saída de outro modelo.
+   */
+  readonly model: string;
   generateStructured<T>(params: GenerateStructuredParams<T>): Promise<ToolResult<T>>;
 }

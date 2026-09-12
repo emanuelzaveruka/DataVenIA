@@ -12,6 +12,7 @@ import { generateStructuredWithRetry } from "../../llm/generate-with-retry";
 import { createAppError } from "../../errors/app-error";
 import { toolFailure, toolSuccess, type ToolResult } from "../../errors/tool-result";
 import { hashBuffer } from "../document/hash";
+import { NO_SCRATCHPAD_CACHE, type ScratchpadCache } from "../../persistence/scratchpad-cache";
 import { buildScratchpadPrompt, SCRATCHPAD_SYSTEM_PROMPT } from "./prompts";
 
 /**
@@ -35,7 +36,13 @@ export async function generateScratchpad(
   candidate: RankedCandidate,
   provider: LlmProvider,
   jurisprudenceProvider: JurisprudenceProvider,
+  cache: ScratchpadCache = NO_SCRATCHPAD_CACHE,
 ): Promise<ToolResult<DecisionScratchpad>> {
+  // HU-33 — a consulta ao cache vem antes do fetch e antes do modelo: reaproveitar depois de já
+  // ter pago as duas chamadas não economizaria nada.
+  const cached = await cache.find(candidate.item.id);
+  if (cached) return toolSuccess(cached, { source: "cache" });
+
   const decisionResult = await jurisprudenceProvider.fetchDecision(candidate.item.id);
   if (decisionResult.isError) return decisionResult;
 
@@ -124,6 +131,8 @@ export async function generateScratchpad(
       }),
     );
   }
+
+  await cache.save(candidate.item.id, parsed.data);
 
   return toolSuccess(parsed.data);
 }
