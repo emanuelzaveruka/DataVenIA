@@ -75,6 +75,17 @@ describe("createResilientLlmProvider", () => {
     expect(fallback.generateStructured).not.toHaveBeenCalled();
   });
 
+  it("does not hide a non-retryable primary failure behind the fallback provider", async () => {
+    const primary = failing("openai", "UPSTREAM", false);
+    const fallback = failing("anthropic", "UPSTREAM", false);
+
+    const result = await createResilientLlmProvider(primary, fallback, createCircuitBreaker()).generateStructured(params);
+
+    expect(result.isError).toBe(true);
+    if (result.isError) expect(result.error.code).toBe("OPENAI_FAIL");
+    expect(fallback.generateStructured).not.toHaveBeenCalled();
+  });
+
   it("stops calling the primary once the circuit opens, going straight to the fallback (HU-14)", async () => {
     const primary = failing("openai", "UPSTREAM");
     const fallback = succeeding("deepseek");

@@ -47,10 +47,11 @@ function isProviderName(value: string | undefined): value is LlmProviderName {
 /**
  * Único ponto de seleção de provider de LLM (§15).
  *
- * `LLM_PROVIDER` escolhe o primário e `LLM_FALLBACK_PROVIDER` o reserva; sem elas, a ordem de
- * `PROVIDER_SLOTS` decide entre os que tiverem chave configurada. Com dois providers disponíveis,
- * o retorno é um `createResilientLlmProvider` — indisponibilidade de um modelo não derruba a
- * análise, e a origem real de cada resposta fica em `metadata.source`, nunca silenciosa.
+ * `LLM_PROVIDER` fixa o provider usado e `LLM_FALLBACK_PROVIDER` só liga reserva quando
+ * explicitamente definido; sem elas, a ordem de `PROVIDER_SLOTS` decide entre os que tiverem chave
+ * configurada. Com dois providers disponíveis nesse modo automático, o retorno é um
+ * `createResilientLlmProvider` — indisponibilidade de um modelo não derruba a análise, e a origem
+ * real de cada resposta fica em `metadata.source`, nunca silenciosa.
  *
  * Um provider nomeado explicitamente sem a chave correspondente é erro, não degradação: preferir
  * outro modelo em silêncio esconderia exatamente o problema que a pessoa quer ver.
@@ -83,7 +84,9 @@ export function getLlmProvider(env: NodeJS.ProcessEnv = process.env): LlmProvide
 
   const fallbackSlot = isProviderName(explicitFallback)
     ? slotFor(explicitFallback)
-    : available.find((slot) => slot.name !== primarySlot.name);
+    : explicitPrimary
+      ? undefined
+      : available.find((slot) => slot.name !== primarySlot.name);
 
   const primary = primarySlot.create(env);
   if (!fallbackSlot || fallbackSlot.name === primarySlot.name) return primary;

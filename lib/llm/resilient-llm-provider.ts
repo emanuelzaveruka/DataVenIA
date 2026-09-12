@@ -34,7 +34,9 @@ export function createResilientLlmProvider(
           return { ...primaryResult, metadata: { ...primaryResult.metadata, source: primary.name } };
         }
 
-        if (primaryResult.error.category === "STRUCTURED_OUTPUT") return primaryResult;
+        if (primaryResult.error.category === "STRUCTURED_OUTPUT" || !primaryResult.error.isRetryable) {
+          return primaryResult;
+        }
 
         breaker.onFailure(primaryResult.error.isRetryable);
       }

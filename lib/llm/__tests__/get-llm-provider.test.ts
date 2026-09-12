@@ -12,13 +12,13 @@ describe("getLlmProvider", () => {
     expect(provider.name).toBe("resilient(openai+deepseek)");
   });
 
-  it("lets LLM_PROVIDER invert which model is primary", () => {
+  it("lets LLM_PROVIDER lock the selected model even when other keys exist in the shell", () => {
     const provider = getLlmProvider(env({
       LLM_PROVIDER: "deepseek",
       OPENAI_API_KEY: "a",
       DEEPSEEK_API_KEY: "b",
     }));
-    expect(provider.name).toBe("resilient(deepseek+openai)");
+    expect(provider.name).toBe("deepseek");
   });
 
   it("honours an explicit LLM_FALLBACK_PROVIDER over the default order", () => {

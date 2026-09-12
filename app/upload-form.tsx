@@ -1,13 +1,8 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-
-interface StageEvent {
-  stage: string;
-  label: string;
-  status: "COMPLETED" | "FAILED";
-  durationMs: number;
-}
+import type { FinalReport } from "../lib/schemas/report.schema";
+import { ReportView } from "./report-view";
 
 interface RedactionSummary {
   type: string;
@@ -15,31 +10,46 @@ interface RedactionSummary {
   count: number;
 }
 
+interface PipelineProgressStep {
+  stage: string;
+  label: string;
+  count?: number;
+  done: boolean;
+}
+
 interface UploadSuccess {
+  runId: string;
+  traceId: string;
   documentId: string;
   fileName: string;
   mimeType: string;
   metadata: { pageCount?: number; hash: string };
   sanitizedTextPreview: string;
   redactions: RedactionSummary[];
-  stages: StageEvent[];
+  progress: PipelineProgressStep[];
+  provider?: { llm: string; model: string; jurisprudence: string };
+  scratchpads?: { requested: number; processed: number; failed: number; status: string };
+  report: FinalReport;
 }
 
 interface UploadErrorBody {
   error: { code?: string; userMessage?: string; description?: string };
 }
 
-const PENDING_STAGES: { stage: string; label: string }[] = [
-  { stage: "RECEIVED", label: "Arquivo recebido" },
-  { stage: "VALIDATING", label: "Validando arquivo" },
-  { stage: "PARSING", label: "Extraindo texto" },
-  { stage: "SANITIZING", label: "Sanitizando dados pessoais" },
+const PENDING_PROGRESS: PipelineProgressStep[] = [
+  { stage: "INGESTION", label: "Documento processado", done: false },
+  { stage: "QUERY_GENERATION", label: "Queries de pesquisa geradas", done: false },
+  { stage: "SEARCH", label: "Candidatos encontrados", done: false },
+  { stage: "SCRATCHPAD_SELECTION", label: "Decisões selecionadas para análise profunda", done: false },
+  { stage: "SCRATCHPAD_GENERATION", label: "Scratchpads válidos", done: false },
+  { stage: "CROSS_FILE_ANALYSIS", label: "Análise cruzada concluída", done: false },
+  { stage: "EVIDENCE_VERIFICATION", label: "Evidências verificadas na fonte oficial", done: false },
+  { stage: "REPORT_GENERATION", label: "Relatório pronto", done: false },
 ];
 
 export function UploadForm() {
   const [file, setFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [stages, setStages] = useState<StageEvent[] | null>(null);
   const [result, setResult] = useState<UploadSuccess | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -48,7 +58,6 @@ export function UploadForm() {
     if (!file) return;
 
     setIsSubmitting(true);
-    setStages(null);
     setResult(null);
     setErrorMessage(null);
 
@@ -68,7 +77,6 @@ export function UploadForm() {
         return;
       }
 
-      setStages(body.stages);
       setResult(body);
     } catch {
       setErrorMessage("Não foi possível conectar ao servidor. Tente novamente.");
@@ -77,7 +85,7 @@ export function UploadForm() {
     }
   }
 
-  const displayStages = stages ?? (isSubmitting ? PENDING_STAGES.map((s) => ({ ...s, status: undefined })) : null);
+  const displayProgress = result?.progress ?? (isSubmitting ? PENDING_PROGRESS : null);
 
   return (
     <div className="flex flex-col gap-4">
@@ -97,12 +105,15 @@ export function UploadForm() {
         </button>
       </form>
 
-      {displayStages && (
+      {displayProgress && (
         <ul className="flex flex-col gap-1 text-sm">
-          {displayStages.map((stage) => (
-            <li key={stage.stage} className="flex items-center gap-2">
-              <StatusDot status={stage.status} />
-              <span>{stage.label}</span>
+          {displayProgress.map((step) => (
+            <li key={`${step.stage}-${step.label}`} className="flex items-center gap-2">
+              <StatusDot status={step.done ? "COMPLETED" : undefined} />
+              <span>
+                {step.label}
+                {typeof step.count === "number" ? ` (${step.count})` : ""}
+              </span>
             </li>
           ))}
         </ul>
@@ -115,30 +126,46 @@ export function UploadForm() {
       )}
 
       {result && (
-        <div className="rounded-lg border border-neutral-300 p-4 text-sm dark:border-neutral-700">
-          <p className="font-medium">Documento processado</p>
-          <p className="mt-1 text-neutral-500">
-            {result.fileName} · {result.metadata.pageCount ? `${result.metadata.pageCount} página(s)` : ""}
-          </p>
-          {result.redactions.length > 0 && (
-            <div className="mt-3">
-              <p className="text-neutral-500">Dados pessoais mascarados antes da análise:</p>
-              <ul className="mt-1 list-disc pl-5">
-                {result.redactions.map((r) => (
-                  <li key={`${r.type}-${r.marker}`}>
-                    {r.marker} × {r.count}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          <details className="mt-3">
-            <summary className="cursor-pointer text-neutral-500">Ver prévia do texto sanitizado</summary>
-            <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-xs text-neutral-600 dark:text-neutral-400">
-              {result.sanitizedTextPreview}
-            </pre>
-          </details>
-        </div>
+        <>
+          <div className="rounded-lg border border-neutral-300 p-4 text-sm dark:border-neutral-700">
+            <p className="font-medium">Documento processado</p>
+            <p className="mt-1 text-neutral-500">
+              {result.fileName} · {result.metadata.pageCount ? `${result.metadata.pageCount} página(s)` : ""}
+            </p>
+            {result.provider && (
+              <p className="mt-2 text-xs text-neutral-500">
+                Execução {result.runId} · {result.provider.llm}/{result.provider.model} · jurisprudência{" "}
+                {result.provider.jurisprudence}
+              </p>
+            )}
+            {result.scratchpads && (
+              <p className="mt-1 text-xs text-neutral-500">
+                Scratchpads: {result.scratchpads.processed}/{result.scratchpads.requested}
+                {result.scratchpads.failed > 0 ? ` · ${result.scratchpads.failed} falha(s)` : ""}
+              </p>
+            )}
+            {result.redactions.length > 0 && (
+              <div className="mt-3">
+                <p className="text-neutral-500">Dados pessoais mascarados antes da análise:</p>
+                <ul className="mt-1 list-disc pl-5">
+                  {result.redactions.map((r) => (
+                    <li key={`${r.type}-${r.marker}`}>
+                      {r.marker} × {r.count}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <details className="mt-3">
+              <summary className="cursor-pointer text-neutral-500">Ver prévia do texto sanitizado</summary>
+              <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-xs text-neutral-600 dark:text-neutral-400">
+                {result.sanitizedTextPreview}
+              </pre>
+            </details>
+          </div>
+
+          <ReportView report={result.report} />
+        </>
       )}
     </div>
   );

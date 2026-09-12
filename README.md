@@ -97,14 +97,16 @@ cp .env.example .env.local
 ```
 
 Preencha ao menos uma chave: `OPENAI_API_KEY`, `DEEPSEEK_API_KEY` ou `ANTHROPIC_API_KEY`
-(`*_MODEL` sobrescreve o modelo padrão de cada um). Ponto único de seleção:
+(`*_MODEL` sobrescreve o modelo padrão de cada um; OpenAI usa `gpt-5-nano` por padrão para
+reduzir custo no primeiro teste real). Ponto único de seleção:
 `lib/llm/get-llm-provider.ts` — nenhum serviço importa SDK de modelo.
 
-**Com duas chaves configuradas, o provider vira resiliente automaticamente** (HU-14/§11.4): o
-primário responde e, se estiver fora do ar, a chamada degrada para o reserva na mesma requisição,
-com a origem real em `metadata.source` — nunca silenciosa. Falhas retryable alimentam o circuit
-breaker, que passa a pular o primário enquanto aberto. `LLM_PROVIDER` escolhe o primário e
-`LLM_FALLBACK_PROVIDER` o reserva; sem elas, a ordem é `openai`, `deepseek`, `anthropic`.
+**Com duas chaves configuradas e nenhum provider forçado, o provider vira resiliente
+automaticamente** (HU-14/§11.4): o primário responde e, se estiver fora do ar, a chamada degrada
+para o reserva na mesma requisição, com a origem real em `metadata.source` — nunca silenciosa.
+Falhas retryable alimentam o circuit breaker, que passa a pular o primário enquanto aberto.
+`LLM_PROVIDER` fixa o provider usado; `LLM_FALLBACK_PROVIDER` liga um reserva explícito. Sem elas,
+a ordem automática é `openai`, `deepseek`, `anthropic`.
 
 Uma exceção deliberada: **saída estruturada inválida não troca de modelo**. Essa falha é do
 conteúdo gerado, não da disponibilidade do provider, e §11.7/HU-20 já a tratam com

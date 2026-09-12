@@ -2,7 +2,7 @@ import type { LlmProvider } from "../provider";
 import { createOpenAiCompatibleProvider } from "./openai-compatible-provider";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
-const DEFAULT_MODEL = "gpt-4.1";
+const DEFAULT_MODEL = "gpt-5-nano";
 
 export interface OpenAiProviderConfig {
   apiKey: string;

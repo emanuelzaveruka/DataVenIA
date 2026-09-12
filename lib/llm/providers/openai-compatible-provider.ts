@@ -75,16 +75,17 @@ ${JSON.stringify(jsonSchema)}`;
 
       if (!response.ok) {
         const category = response.status === 429 ? "RATE_LIMIT" : "UPSTREAM";
+        const body = await response.text().catch(() => "");
         return toolFailure(
           createAppError({
             code: `${errorPrefix}_HTTP_${response.status}`,
             category,
             severity: "ERROR",
-            description: `${name} API returned HTTP ${response.status}`,
+            description: `${name} API returned HTTP ${response.status}${body ? `: ${body.slice(0, 500)}` : ""}`,
             isRetryable: isRetryable({ category, httpStatus: response.status }),
             source: name,
             operation: "generateStructured",
-            metadata: { status: response.status },
+            metadata: { status: response.status, body: body.slice(0, 500) },
           }),
         );
       }
