@@ -25,7 +25,14 @@ const STOPWORDS = new Set([
   "por",
 ]);
 
-const MAX_QUERY_TOKENS = 8;
+/**
+ * Medido contra o portal em 2026-09-13: `criterioPesquisa` é AND estrito, e cada palavra a mais
+ * reduz a contagem exponencialmente — "plano saude" = 243, "plano saude negativa" = 45, "plano
+ * saude negativa cobertura" = 32, e a partir de 4-5 palavras é comum cair a 0-2. 3 é o teto que
+ * ainda deixa alguma margem; acima disso a query costuma zerar sozinha antes de qualquer filtro
+ * de relevância entrar em ação.
+ */
+const MAX_QUERY_TOKENS = 3;
 
 function removeDiacritics(value: string): string {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");

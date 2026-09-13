@@ -13,6 +13,13 @@ export interface ToolResultMetadata {
   url?: string;
   /** Quantas páginas a fonte externa entregou nesta chamada (busca paginada). */
   pagesFetched?: number;
+  /**
+   * Quantas palavras-chave finais foram descartadas do fim da query original antes de a busca
+   * devolver algum resultado. A busca do TJPR é AND estrito — cada termo a mais derruba a
+   * contagem exponencialmente, e uma query com poucas palavras a mais já zera. `0`/ausente
+   * significa que a query original bastou.
+   */
+  relaxations?: number;
   /** Tempos internos opcionais de uma ferramenta composta, usados para diagnosticar gargalos. */
   timing?: Record<string, number>;
   /**

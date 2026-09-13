@@ -740,6 +740,9 @@ async function* pipelineEvents(
         // Quantas páginas o portal realmente entregou. Ficar em 1 com `SEARCH_MAX_PAGES = 3`
         // significa que o parâmetro de paginação ainda não está configurado (HU-38).
         pagesFetched: searchResult.metadata?.pagesFetched,
+        // Quantas palavras do fim de `queryEnviada` o provider descartou até achar algum
+        // resultado — a busca do TJPR é AND estrito e zera sozinha com poucos termos a mais.
+        relaxations: searchResult.metadata?.relaxations,
         collectedCap: SEARCH_COLLECTED_ITEMS_CAP,
         items: audit ? searchResult.data.items : undefined,
       },

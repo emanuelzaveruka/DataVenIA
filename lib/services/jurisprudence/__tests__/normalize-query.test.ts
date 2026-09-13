@@ -12,9 +12,9 @@ describe("normalizeTjprKeywordQuery", () => {
     expect(normalizeTjprKeywordQuery("art. 51 do CDC")).toBe("art 51 CDC");
   });
 
-  it("limita queries longas para não mandar texto grande ao portal", () => {
+  it("limita queries longas a 3 palavras — a busca do TJPR é AND estrito e zera com mais termos", () => {
     expect(
       normalizeTjprKeywordQuery("negativa de cobertura de procedimento cirúrgico com prescrição médica urgente"),
-    ).toBe("negativa cobertura procedimento cirurgico prescricao medica urgente");
+    ).toBe("negativa cobertura procedimento");
   });
 });

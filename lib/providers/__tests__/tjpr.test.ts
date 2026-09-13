@@ -296,6 +296,88 @@ describe("TjprProvider — paginação (HU-13/HU-38)", () => {
 });
 
 /**
+ * Medido contra o portal em 2026-09-13: `criterioPesquisa` é AND estrito — "plano saude" = 243
+ * resultados, "plano saude reajuste individual" (4 palavras) = 2, e a maioria das combinações de
+ * 5+ palavras zera. Sem relaxamento, uma query gerada com uma palavra a mais do que o portal
+ * aceita devolveria candidatos zero em vez de degradar para uma busca mais ampla.
+ */
+describe("TjprProvider — relaxa palavras-chave quando a busca zera (AND estrito)", () => {
+  function zeroHtml(): string {
+    return `<html><body><td>0 registro(s) encontrado(s)</td></body></html>`;
+  }
+
+  function hitHtml(id: string, total = 9): string {
+    return `<html><body>
+      <td>${total} registro(s) encontrado(s)</td>
+      <tr class="even">
+        <td>
+          <input type="checkbox" name="idsSelecionados" value="${id}">
+          <a href="/jurisprudencia/j/${id}/caso-0018288-78.2024.8.16.0019">0018288-78.2024.8.16.0019</a>
+          Data Julgamento: 16/05/2025
+        </td>
+        <td class="juris-tabela-ementa">Plano de saúde. Cobertura de exame.</td>
+      </tr>
+    </body></html>`;
+  }
+
+  // Uma página só por tentativa: o que está sob teste aqui é o relaxamento de palavras, não a
+  // paginação (já coberta acima) — sem isso, um resultado com só 1 item repetiria a mesma página
+  // até `novos.length === 0`, inflando a contagem de chamadas por um motivo alheio ao teste.
+  const SINGLE_PAGE = { pageParam: undefined, pageSizeParam: undefined, firstPageIndex: 1, pageSize: 20, maxPages: 1, itemsCap: 60 };
+
+  it("descarta a última palavra e tenta de novo quando a query original zera", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const criterio = new URL(String(input)).searchParams.get("criterioPesquisa");
+      return criterio === "plano saude" ? htmlResponse(hitHtml("1")) : htmlResponse(zeroHtml());
+    });
+    const provider = createTjprProvider({ baseUrl: "https://portal.tjpr.jus.br", fetchImpl, pagination: SINGLE_PAGE });
+
+    const result = await provider.search({ query: "plano saude reajuste" });
+
+    expect(result.isError).toBe(false);
+    if (result.isError) return;
+    expect(result.data.items).toHaveLength(1);
+    expect(result.data.totalCount).toBe(9);
+    expect(result.metadata?.relaxations).toBe(1);
+    expect(result.metadata?.url).toContain("criterioPesquisa=plano%20saude");
+
+    const criteriosTentados = fetchImpl.mock.calls.map(
+      (call) => new URL(String(call[0])).searchParams.get("criterioPesquisa"),
+    );
+    expect(criteriosTentados).toEqual(["plano saude reajuste", "plano saude"]);
+  });
+
+  it("para de relaxar quando sobra uma palavra só, mesmo que ainda zere", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => htmlResponse(zeroHtml()));
+    const provider = createTjprProvider({ baseUrl: "https://portal.tjpr.jus.br", fetchImpl });
+
+    const result = await provider.search({ query: "plano saude reajuste" });
+
+    expect(result.isError).toBe(false);
+    if (result.isError) return;
+    expect(result.data.items).toHaveLength(0);
+    expect(result.metadata?.relaxations).toBe(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    const criteriosTentados = fetchImpl.mock.calls.map(
+      (call) => new URL(String(call[0])).searchParams.get("criterioPesquisa"),
+    );
+    expect(criteriosTentados).toEqual(["plano saude reajuste", "plano saude", "plano"]);
+  });
+
+  it("não relaxa quando a query original já traz resultado", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => htmlResponse(hitHtml("1")));
+    const provider = createTjprProvider({ baseUrl: "https://portal.tjpr.jus.br", fetchImpl, pagination: SINGLE_PAGE });
+
+    const result = await provider.search({ query: "plano saude" });
+
+    expect(result.isError).toBe(false);
+    if (result.isError) return;
+    expect(result.metadata?.relaxations).toBeUndefined();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
  * As duas regras abaixo saíram de uma medição contra o portal em 2026-09-13, não de leitura de
  * documentação: a URL canônica com o sufixo devolve 200, o atalho só com o id devolve 404, e
  * `idsTipoDecisaoSelecionados=3` reduz `plano de saude` a 62 decisões de competência (243 sem o

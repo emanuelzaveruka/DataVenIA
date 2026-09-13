@@ -394,6 +394,16 @@ function parseDecisionHtml(id: string, html: string, sourceUrl: string): RawDeci
   };
 }
 
+interface TjprSearchAttempt {
+  items: JurisprudenceSearchItem[];
+  totalCount: number;
+  pagesFetched: number;
+  url: string;
+}
+
+/** Abaixo disso não há mais nada a descartar — a última palavra é a busca mínima possível. */
+const MIN_RELAXED_TOKENS = 1;
+
 export function createTjprProvider(options: TjprProviderOptions = {}): JurisprudenceProvider {
   const baseUrl = options.baseUrl ?? DEFAULT_TJPR_BASE_URL;
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -401,56 +411,91 @@ export function createTjprProvider(options: TjprProviderOptions = {}): Jurisprud
   const tipoDecisao = options.tipoDecisao;
   const knownDecisionUrls = new Map<string, string>();
 
+  async function runSearchAttempt(
+    query: JurisprudenceQuery,
+  ): Promise<ToolResult<TjprSearchAttempt>> {
+    const firstUrl = buildSearchUrl(query, baseUrl, {
+      pagination: { config: pagination, page: 0 },
+      tipoDecisao,
+    });
+    // Sem o nome do parâmetro de página, pedir a página 2 devolveria a 1 de novo: uma página é o
+    // máximo honesto. Com ele, o teto é o menor entre maxPages e o teto de itens coletados.
+    const maxPages = pagination.pageParam ? pagination.maxPages : 1;
+
+    const items: JurisprudenceSearchItem[] = [];
+    const seen = new Set<string>();
+    let totalCount = 0;
+    let pagesFetched = 0;
+
+    for (let page = 0; page < maxPages; page += 1) {
+      const url =
+        page === 0
+          ? firstUrl
+          : buildSearchUrl(query, baseUrl, { pagination: { config: pagination, page }, tipoDecisao });
+      const html = await fetchHtml(fetchImpl, url, "tjpr.search");
+      // Falha na primeira página é falha da busca; numa página seguinte, é motivo para parar com
+      // o que já veio — descartar duas páginas boas por causa da terceira seria pior.
+      if (html.isError) {
+        if (page === 0) return html;
+        break;
+      }
+
+      const parsed = parseSearchHtml(html.data, baseUrl);
+      pagesFetched += 1;
+      totalCount = Math.max(totalCount, parsed.totalCount);
+
+      const novos = parsed.items.filter((item) => !seen.has(item.id));
+      for (const item of novos) {
+        seen.add(item.id);
+        items.push(item);
+        knownDecisionUrls.set(item.id, item.url);
+      }
+
+      // Página que não trouxe nada novo significa que o portal ignorou o parâmetro de paginação
+      // (ou que acabaram os resultados). Insistir só gastaria requisição contra a mesma página.
+      if (novos.length === 0 || items.length >= pagination.itemsCap) break;
+    }
+
+    return toolSuccess({
+      items: items.slice(0, pagination.itemsCap),
+      totalCount: totalCount || items.length,
+      pagesFetched,
+      url: firstUrl,
+    });
+  }
+
   return {
     name: "tjpr",
 
     async search(query: JurisprudenceQuery): Promise<ToolResult<JurisprudenceSearchResult>> {
       const startedAt = Date.now();
-      const firstUrl = buildSearchUrl(query, baseUrl, {
-        pagination: { config: pagination, page: 0 },
-        tipoDecisao,
-      });
-      // Sem o nome do parâmetro de página, pedir a página 2 devolveria a 1 de novo: uma página é o
-      // máximo honesto. Com ele, o teto é o menor entre maxPages e o teto de itens coletados.
-      const maxPages = pagination.pageParam ? pagination.maxPages : 1;
 
-      const items: JurisprudenceSearchItem[] = [];
-      const seen = new Set<string>();
-      let totalCount = 0;
-      let pagesFetched = 0;
+      const tokens = query.query.split(/\s+/).filter(Boolean);
+      let attemptTokens = tokens.length > 0 ? tokens : [query.query];
+      let relaxations = 0;
+      let attempt = await runSearchAttempt({ ...query, query: attemptTokens.join(" ") });
 
-      for (let page = 0; page < maxPages; page += 1) {
-        const url =
-          page === 0
-            ? firstUrl
-            : buildSearchUrl(query, baseUrl, { pagination: { config: pagination, page }, tipoDecisao });
-        const html = await fetchHtml(fetchImpl, url, "tjpr.search");
-        // Falha na primeira página é falha da busca; numa página seguinte, é motivo para parar com
-        // o que já veio — descartar duas páginas boas por causa da terceira seria pior.
-        if (html.isError) {
-          if (page === 0) return html;
-          break;
-        }
-
-        const parsed = parseSearchHtml(html.data, baseUrl);
-        pagesFetched += 1;
-        totalCount = Math.max(totalCount, parsed.totalCount);
-
-        const novos = parsed.items.filter((item) => !seen.has(item.id));
-        for (const item of novos) {
-          seen.add(item.id);
-          items.push(item);
-          knownDecisionUrls.set(item.id, item.url);
-        }
-
-        // Página que não trouxe nada novo significa que o portal ignorou o parâmetro de paginação
-        // (ou que acabaram os resultados). Insistir só gastaria requisição contra a mesma página.
-        if (novos.length === 0 || items.length >= pagination.itemsCap) break;
+      // Medido contra o portal em 2026-09-13: `criterioPesquisa` é AND estrito, e uma palavra a
+      // mais do que necessário não "refina" a busca, zera. Devolver essa página vazia como se
+      // fosse o universo real de decisões esvaziaria o funil de candidatos sem motivo — descartar
+      // a última palavra e tentar de novo é mais barato do que perder a query inteira.
+      while (!attempt.isError && attempt.data.totalCount === 0 && attemptTokens.length > MIN_RELAXED_TOKENS) {
+        attemptTokens = attemptTokens.slice(0, -1);
+        relaxations += 1;
+        attempt = await runSearchAttempt({ ...query, query: attemptTokens.join(" ") });
       }
 
+      if (attempt.isError) return attempt;
+
       return toolSuccess(
-        { items: items.slice(0, pagination.itemsCap), totalCount: totalCount || items.length },
-        { source: "tjpr", durationMs: Date.now() - startedAt, url: firstUrl, pagesFetched },
+        { items: attempt.data.items, totalCount: attempt.data.totalCount },
+        {
+          source: "tjpr",
+          durationMs: Date.now() - startedAt,
+          url: attempt.data.url,
+          pagesFetched: attempt.data.pagesFetched,
+          ...(relaxations > 0 ? { relaxations } : {}),
+        },
       );
     },
 
