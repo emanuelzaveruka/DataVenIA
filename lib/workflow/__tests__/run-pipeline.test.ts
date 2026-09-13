@@ -8,6 +8,8 @@ import { toolFailure } from "../../errors/tool-result";
 import { createAppError } from "../../errors/app-error";
 import type { GenerateStructuredParams, LlmProvider } from "../../llm/provider";
 import type { DataVeniaRepository } from "../../persistence/repository";
+import type { JurisprudenceProvider } from "../../providers/jurisprudence-provider";
+import type { JurisprudenceQuery } from "../../schemas/search.schema";
 
 const CASE_ANALYSIS = {
   processNumber: "0009876-54.2025.8.16.0001",
@@ -339,5 +341,99 @@ describe("runPipeline", () => {
     expect(logs.every((log) => log.traceId === "trace-test-0001")).toBe(true);
     expect(logs.map((log) => log.toolName)).toContain("analyzeCase");
     expect(logs.map((log) => log.toolName)).toContain("buildReport");
+  });
+});
+
+/**
+ * Termos e recorte escolhidos pelo usuário na tela de envio.
+ *
+ * O que está sendo protegido: os termos dele SOMAM às queries do modelo. Se um dia passarem a
+ * substituí-las, a busca por jurisprudência contrária de HU-11 some sem ninguém perceber — e o
+ * relatório continua afirmando "nenhum precedente contrário identificado na amostra", que passaria
+ * a ser verdade sobre a busca, não sobre o acervo.
+ */
+describe("runPipeline — escopo definido pelo usuário", () => {
+  function spyProvider(): { provider: JurisprudenceProvider; recebidas: JurisprudenceQuery[] } {
+    const base = createFixtureProvider();
+    const recebidas: JurisprudenceQuery[] = [];
+    return {
+      recebidas,
+      provider: {
+        ...base,
+        search: (query: JurisprudenceQuery) => {
+          recebidas.push(query);
+          return base.search(query);
+        },
+      } as JurisprudenceProvider,
+    };
+  }
+
+  async function rodar(input: { extraTerms?: string[]; filters?: JurisprudenceQuery["filters"] }) {
+    const { provider, recebidas } = spyProvider();
+    const events: PipelineEvent[] = [];
+
+    for await (const event of runPipeline(
+      {
+        runId: "run-escopo-0001",
+        traceId: "trace-escopo-0001",
+        file: {
+          name: "peticao.txt",
+          size: Buffer.byteLength(PETITION),
+          type: "text/plain",
+          bytes: Buffer.from(PETITION, "utf-8"),
+        },
+        ...input,
+      },
+      {
+        repository: createInMemoryRepository(),
+        llmProvider: stubLlmProvider(),
+        jurisprudenceProvider: provider,
+      },
+    )) {
+      events.push(event);
+    }
+
+    return { events, recebidas };
+  }
+
+  it("busca os termos do usuário ALÉM das queries do modelo, nunca no lugar delas", async () => {
+    const { recebidas } = await rodar({ extraTerms: ["reembolso de despesas médicas"] });
+
+    const buscados = recebidas.map((item) => item.query);
+    // As duas do modelo continuam inteiras — inclusive a CONTRARY, que é o ponto.
+    for (const doModelo of QUERY_PLAN.queries) {
+      expect(buscados).toContain(doModelo.query);
+    }
+    expect(buscados).toContain("reembolso de despesas médicas");
+    expect(buscados).toHaveLength(QUERY_PLAN.queries.length + 1);
+  });
+
+  it("ignora termo repetido, vazio ou igual ao que o modelo já gerou", async () => {
+    const { recebidas } = await rodar({
+      extraTerms: ["  ", "novo termo", "novo termo", QUERY_PLAN.queries[0]!.query],
+    });
+
+    expect(recebidas.map((item) => item.query)).toHaveLength(QUERY_PLAN.queries.length + 1);
+  });
+
+  it("aplica o recorte em todas as queries, não só em algumas", async () => {
+    const { recebidas } = await rodar({
+      extraTerms: ["reembolso de despesas médicas"],
+      filters: { judgingBody: "9ª Câmara Cível", periodStart: "2020-01-01" },
+    });
+
+    expect(recebidas.length).toBeGreaterThan(1);
+    for (const recebida of recebidas) {
+      expect(recebida.filters).toEqual({
+        judgingBody: "9ª Câmara Cível",
+        periodStart: "2020-01-01",
+      });
+    }
+  });
+
+  it("sem escopo, busca exatamente o que o modelo gerou", async () => {
+    const { recebidas } = await rodar({});
+    expect(recebidas.map((item) => item.query)).toEqual(QUERY_PLAN.queries.map((q) => q.query));
+    expect(recebidas.every((item) => item.filters === undefined)).toBe(true);
   });
 });
