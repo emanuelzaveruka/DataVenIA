@@ -783,11 +783,17 @@ async function* pipelineEvents(
         {
           totalFound: uniqueItems.length,
           selectedCount: selected.data.length,
-          // O que o TJPR declara ter no acervo para esta query — quase sempre bem maior que
-          // `totalFound`, porque a coleta para no teto (`SEARCH_COLLECTED_ITEMS_CAP`). Sempre
-          // visível, mesmo fora do modo auditoria: sem isto, "60 encontrados" parece o universo
-          // inteiro em vez de uma amostra de um acervo de centenas de milhares.
-          declaradoPeloTjpr: searchResult.data.totalCount,
+          // Sempre visível, mesmo fora do modo auditoria: sem isto, uma resposta da fixture (o
+          // catálogo fictício de 9 decisões de HU-37, que "search" devolve inteiro quando nada bate
+          // com a query) é indistinguível de uma busca real no TJPR que por acaso achou pouco. O
+          // `[AVISO]` abaixo só cobre a fixture como DEGRADAÇÃO (provider real falhou); rodando em
+          // fixture de propósito (`JURISPRUDENCE_PROVIDER=fixture`, inclusive por env ausente) não
+          // é degradação nenhuma, mas o usuário ainda precisa saber que não é o TJPR de verdade.
+          fonte: searchProvider,
+          // O que a fonte declara ter para esta query. No TJPR real quase sempre bem maior que
+          // `totalFound`, porque a coleta para no teto (`SEARCH_COLLECTED_ITEMS_CAP`); na fixture é
+          // só o tamanho do catálogo fictício.
+          declarado: searchResult.data.totalCount,
         },
         () => ({
           rankedCap: SEARCH_CANDIDATE_LIMIT,
@@ -809,7 +815,9 @@ async function* pipelineEvents(
       ),
       subTasks: audit ? searchSubTasks : undefined,
       logs: [
-        `[INFO] ${uniqueItems.length} acórdãos coletados (de ${searchResult.data.totalCount.toLocaleString("pt-BR")} declarados pelo TJPR para esta busca); top ${selected.data.length} selecionados.`,
+        searchProvider === "fixture"
+          ? `[AVISO] Esta busca respondeu com a FIXTURE (catálogo fictício de demonstração, ${searchResult.data.totalCount} decisão/ões) — não é o acervo real do TJPR. ${uniqueItems.length} coletados; top ${selected.data.length} selecionados.`
+          : `[INFO] ${uniqueItems.length} acórdãos coletados (de ${searchResult.data.totalCount.toLocaleString("pt-BR")} declarados pelo TJPR para esta busca); top ${selected.data.length} selecionados.`,
         ...(degradedSources.length > 0
           ? [
               `[AVISO] A fonte configurada (${sourceProvider.name}) falhou em ${degradedSources.length} busca(s) e a fixture respondeu no lugar. Decisões de fixture são fictícias: não serão exibidas como fonte.`,
