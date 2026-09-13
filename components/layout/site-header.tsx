@@ -30,7 +30,7 @@ export function SiteHeader() {
   const pathname = usePathname();
 
   return (
-    <header className="sticky top-0 z-50 border-b-[3px] border-vn-acao bg-vn-navy-900">
+    <header className="nao-imprimir sticky top-0 z-50 border-b-[3px] border-vn-acao bg-vn-navy-900">
       <Envelope className="flex flex-wrap items-center gap-x-4 gap-y-2 py-2.5">
         {/*
           A versão "clara" do logotipo (creme + verde) é a que existe para fundo escuro. A "escura"

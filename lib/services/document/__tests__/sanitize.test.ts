@@ -88,4 +88,75 @@ describe("sanitizePersonalData", () => {
     const { sanitizedText } = sanitizePersonalData(`Fatos do caso: ${injection}.`);
     expect(sanitizedText).toContain(injection);
   });
+
+  /**
+   * Cabeçalho de autuação — o formato de SENTENÇA, que a qualificação de petição não alcança.
+   * Era por aqui que o nome da parte chegava intacto ao relatório final.
+   */
+  describe("partes declaradas no cabeçalho", () => {
+    const CABECALHO = [
+      "Processo Digital nº: 1006006-75.2022.8.26.0344",
+      "Classe - Assunto Procedimento Comum Cível - Tratamento médico-hospitalar",
+      "Requerente: Shirley da Silva Miranda",
+      "Requerido: Unimed de Marilia Cooperativa de Trabalho Medico",
+      "Justiça Gratuita",
+      "Juiz(a) de Direito: Dr(a). Paula Jacqueline Bredariol de Oliveira",
+      "VISTOS.",
+      "SHIRLEY DA SILVA MIRANDA, ajuizou a presente ação contra a ré.",
+    ].join("\n");
+
+    it("mascara a parte do cabeçalho mesmo sem bloco de qualificação", () => {
+      const { sanitizedText } = sanitizePersonalData(CABECALHO);
+
+      expect(sanitizedText).toContain("Requerente: [AUTOR]");
+      expect(sanitizedText).not.toContain("Shirley");
+    });
+
+    it("propaga o marcador quando a peça repete o nome em caixa alta", () => {
+      const { sanitizedText } = sanitizePersonalData(CABECALHO);
+
+      // A sentença escreve a parte em caixa mista no cabeçalho e em caixa alta no corpo. Mascarar
+      // só a primeira ocorrência é pior do que não mascarar: parece que rodou.
+      expect(sanitizedText).not.toContain("SHIRLEY DA SILVA MIRANDA");
+      expect(sanitizedText).toContain("[AUTOR], ajuizou a presente ação");
+    });
+
+    it("alcança o nome grafado de outro jeito na mesma peça", () => {
+      const texto = [
+        "Requerente: Rosana Pantaroto Mesiano",
+        "Trata-se de ação proposta por ROSANA PANTAROTO MESSIANO em face da ré.",
+      ].join("\n");
+
+      // A peça real grafa com um S a mais no corpo. Comparação literal deixaria vazar.
+      const { sanitizedText } = sanitizePersonalData(texto);
+      expect(sanitizedText).not.toMatch(/Mes+iano/i);
+    });
+
+    it("NÃO mascara pessoa jurídica — empresa não é dado pessoal, e mascará-la cega a análise", () => {
+      const { sanitizedText } = sanitizePersonalData(CABECALHO);
+
+      // "Unimed ... Cooperativa" é o que diz ao Case Understanding que o caso é de plano de saúde.
+      expect(sanitizedText).toContain("Unimed de Marilia Cooperativa de Trabalho Medico");
+    });
+
+    it("não mascara o juiz, que não é parte e é proveniência do documento", () => {
+      const { sanitizedText } = sanitizePersonalData(CABECALHO);
+      expect(sanitizedText).toContain("Paula Jacqueline Bredariol de Oliveira");
+    });
+
+    it("escolhe o marcador pelo rótulo, sem depender de palavra vizinha", () => {
+      const texto = ["Exequente: Carlos Alberto Souto", "Executado: Mariana Lopes Tavares"].join("\n");
+      const { sanitizedText, redactions } = sanitizePersonalData(texto);
+
+      expect(sanitizedText).toContain("Exequente: [AUTOR]");
+      expect(sanitizedText).toContain("Executado: [RÉU]");
+      expect(redactions.find((item) => item.type === "PARTY_NAME")).toBeDefined();
+    });
+
+    it("não vaza o nome original no resumo de redações", () => {
+      const { redactions } = sanitizePersonalData(CABECALHO);
+      const serializado = JSON.stringify(redactions);
+      expect(serializado).not.toContain("Shirley");
+    });
+  });
 });

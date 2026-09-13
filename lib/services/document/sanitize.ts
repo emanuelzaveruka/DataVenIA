@@ -56,6 +56,42 @@ const SIMPLE_REDACTORS: SimpleRedactor[] = [
   },
 ];
 
+/**
+ * Partes declaradas no CABEÇALHO da peça, em formato de rótulo.
+ *
+ *     Requerente: Fulana da Silva
+ *     Requerido: Empresa Tal Ltda
+ *
+ * `QUALIFICATION_BLOCK_PATTERN` sozinho não alcança isto: ele depende de o nome vir seguido do
+ * bloco de qualificação ("Fulana, brasileira, casada, portadora do RG..."), que é como a PETIÇÃO
+ * apresenta as partes. Sentença e despacho apresentam em tabela de autuação, sem qualificação
+ * nenhuma — e era por aí que o nome da parte chegava intacto ao relatório.
+ *
+ * O valor é preso à linha de propósito: o rótulo seguinte (`Juiz(a) de Direito:`, `Justiça
+ * Gratuita`) começa sempre em linha nova, e permitir atravessar `\n` engoliria o resto do
+ * cabeçalho junto com o nome.
+ */
+const PARTY_LABEL_PATTERN =
+  /^[ \t]*(Requerente|Requerida|Requerido|Autora|Autor|Ré|Réu|Exequente|Executada|Executado|Embargante|Embargado|Reclamante|Reclamado|Apelante|Apelado|Agravante|Agravado)(?:\(a?s?\)|s)?\s*:\s*([^\n]{2,120})$/gimu;
+
+/**
+ * Marcadores de pessoa JURÍDICA. Empresa não é dado pessoal — LGPD e HU-05 protegem a pessoa
+ * natural —, e mascarar a ré destrói justamente o sinal que o Case Understanding usa para saber do
+ * que o caso trata: "Unimed ... Cooperativa" diz plano de saúde, "Silimed Indústria de Implantes"
+ * diz vício de produto. Trocar isso por [RÉU] empobrece a análise sem proteger ninguém.
+ *
+ * São formas jurídicas e substantivos institucionais, nunca marcas: uma lista de marcas
+ * envelheceria a cada cliente novo, e o que identifica pessoa jurídica é a forma, não o nome.
+ *
+ * Quando nenhum marcador aparece, o nome É mascarado. A falha, aqui, é para o lado da privacidade.
+ */
+const LEGAL_ENTITY_MARKERS =
+  /\b(?:ltda|s\/?a|sa|eireli|me|epp|cooperativa|coop|funda[çc][ãa]o|associa[çc][ãa]o|instituto|sindicato|banco|hospital|cl[íi]nica|laborat[óo]rio|seguradora|segurado?ra|companhia|cia|ind[úu]stria|com[ée]rcio|servi[çc]os|empreendimentos|participa[çc][õo]es|holding|condom[íi]nio|munic[íi]pio|estado|uni[ãa]o|universidade|faculdade|col[ée]gio|escola|operadora|distribuidora|transportes|constru[çc][õo]es|incorporadora|imobili[áa]ria|telecomunica[çc][õo]es|energia|saneamento)\b/iu;
+
+function isPessoaJuridica(nome: string): boolean {
+  return LEGAL_ENTITY_MARKERS.test(nome);
+}
+
 const QUALIFICATION_BLOCK_PATTERN =
   /\b([A-ZÀ-Ý][a-zà-ÿ]+(?:\s+(?:d[aeo]s?|[A-ZÀ-Ý][a-zà-ÿ]+)){1,5})\s*,\s*(?:brasileiro|brasileira)?[^.\n]{0,100}?\b(?:CPF|RG)\b/gu;
 
@@ -81,8 +117,30 @@ function bump(
   }
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/**
+ * Sequência com cara de nome próprio: duas a seis palavras capitalizadas (ou em caixa alta), com
+ * as partículas "da/de/do/dos/das" permitidas no meio.
+ */
+const CANDIDATE_NAME_RUN =
+  /\b[A-ZÀ-Ý][A-Za-zÀ-ÿ]+(?:\s+(?:d[aeo]s?\s+)?[A-ZÀ-Ý][A-Za-zÀ-ÿ]+){1,5}\b/gu;
+
+/**
+ * Forma de comparação de nomes: sem acento, sem caixa, sem partícula e sem letra repetida.
+ *
+ * A letra repetida sai porque é a variação que peça real produz sozinha — Mesiano/Messiano,
+ * Sousa/Souza não (essa é troca de letra, não repetição), Rafael/Raffael. Colapsar "ss" em "s"
+ * aproxima grafias do MESMO nome sem aproximar nomes diferentes.
+ */
+function normalizeName(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, "")
+    .replace(/\b(d[aeo]s?)\b/g, " ")
+    .replace(/(.)\1+/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
@@ -101,6 +159,24 @@ export function sanitizePersonalData(text: string): SanitizeResult {
   }
 
   const nameToMarker = new Map<string, string>();
+
+  // Partes do cabeçalho de autuação (sentenças, despachos). Roda ANTES do bloco de qualificação
+  // para que, quando as duas formas aparecerem na mesma peça, o marcador escolhido aqui seja o que
+  // se propaga — o rótulo do cabeçalho diz o papel processual sem depender de palavra vizinha.
+  sanitized = sanitized.replace(PARTY_LABEL_PATTERN, (fullMatch, label: string, rawName: string) => {
+    const name = rawName.trim();
+    if (name.length < 2 || isPessoaJuridica(name)) return fullMatch;
+
+    const marker = PLAINTIFF_KEYWORDS.test(label)
+      ? "[AUTOR]"
+      : DEFENDANT_KEYWORDS.test(label)
+        ? "[RÉU]"
+        : "[PARTE]";
+    nameToMarker.set(name, marker);
+    bump(counts, "PARTY_NAME", marker);
+    return fullMatch.replace(name, marker);
+  });
+
   sanitized = sanitized.replace(QUALIFICATION_BLOCK_PATTERN, (fullMatch, rawName: string, offset: number) => {
     const name = rawName.trim();
     // O qualificador de papel processual ("na qualidade de requerente") pode vir antes
@@ -120,10 +196,28 @@ export function sanitizePersonalData(text: string): SanitizeResult {
     return fullMatch.replace(name, marker);
   });
 
-  for (const [name, marker] of nameToMarker) {
-    const wholeNameRegex = new RegExp(`\\b${escapeRegExp(name)}\\b`, "g");
-    sanitized = sanitized.replace(wholeNameRegex, (match) => {
-      if (match === marker) return match;
+  /**
+   * Propagação do nome pelo resto da peça.
+   *
+   * Não é `replace` da string literal: a mesma peça grafa a parte de formas diferentes. No
+   * cabeçalho vem "Rosana Pantaroto Mesiano" e no corpo "ROSANA PANTAROTO MESSIANO" — caixa
+   * diferente E um S a mais. Comparar literalmente mascara a primeira ocorrência e deixa vazar
+   * todas as outras, que é o pior resultado possível: dá a impressão de que a sanitização rodou.
+   *
+   * Então varre candidatos a nome próprio e compara NORMALIZADO (sem acento, sem caixa, sem letra
+   * repetida). A substituição só acontece quando o candidato normaliza para um nome de parte já
+   * conhecido, então a normalização tolerante não pode mascarar nada além do que já foi
+   * identificado como parte.
+   */
+  if (nameToMarker.size > 0) {
+    const porNomeNormalizado = new Map<string, string>();
+    for (const [name, marker] of nameToMarker) {
+      porNomeNormalizado.set(normalizeName(name), marker);
+    }
+
+    sanitized = sanitized.replace(CANDIDATE_NAME_RUN, (match) => {
+      const marker = porNomeNormalizado.get(normalizeName(match));
+      if (!marker) return match;
       bump(counts, "PARTY_NAME", marker);
       return marker;
     });

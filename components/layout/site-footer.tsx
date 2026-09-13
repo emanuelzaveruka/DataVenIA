@@ -14,7 +14,7 @@ import { Envelope } from "./envelope";
  */
 export function SiteFooter() {
   return (
-    <footer className="mt-24 bg-vn-navy-800 py-10">
+    <footer className="nao-imprimir mt-24 bg-vn-navy-800 py-10">
       <Envelope className="flex justify-center">
         <Image
           src="/logo-datavenia-clara.png"

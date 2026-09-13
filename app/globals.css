@@ -270,18 +270,27 @@
     display: block !important;
   }
 
-  /* Não separar um precedente da citação que o sustenta, nem um título do
-     bloco que ele abre. */
-  section,
-  article > div,
-  li {
+  /* `break-inside: avoid` em TODA section e li era grosseiro demais: um bloco
+     maior que a página inteira nunca cabe, então o navegador empurra tudo para
+     a folha seguinte e deixa metade de uma página em branco. Agora a regra é
+     pontual — só o que perde sentido ao ser partido, e só quando couber. */
+  .bloco-indivisivel {
     break-inside: avoid;
   }
 
+  /* Título sozinho no pé da página é órfão: cola no que ele abre. */
   h1,
   h2,
-  h3 {
+  h3,
+  h4 {
     break-after: avoid;
+  }
+
+  /* Mínimo de linhas de um parágrafo de cada lado da quebra. */
+  p,
+  li {
+    orphans: 3;
+    widows: 3;
   }
 
   /* Tabela longa repete o cabeçalho em cada página. */
