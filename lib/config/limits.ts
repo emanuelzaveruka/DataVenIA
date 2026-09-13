@@ -11,6 +11,14 @@ export const MAX_UPLOAD_FILE_SIZE_BYTES = 15 * 1024 * 1024;
 export const MIN_CASE_ANALYSIS_INPUT_CHARS = 200;
 
 /**
+ * Piso de caracteres extraídos por página de um PDF. Abaixo disso, mesmo com texto não-vazio, é
+ * sinal forte de páginas de imagem/digitalizadas com só um resquício de texto selecionável (ex.:
+ * carimbo, cabeçalho, capa digital) — distinto do caso já coberto por `NO_EXTRACTABLE_TEXT`
+ * (zero caracteres). Ver docs/fluxo-jurisprudencial-detalhado.md §5.
+ */
+export const MIN_PDF_CHARS_PER_PAGE = 100;
+
+/**
  * Funil de limites da busca de jurisprudência (HU-13/HU-15/HU-16, contexto-geral.md §6).
  * Centralizado aqui — nunca hardcoded em mais de um lugar do pipeline (validação de HU-13).
  *

@@ -4,7 +4,12 @@ import mammoth from "mammoth";
 import { createAppError } from "../../errors/app-error";
 import { toolFailure, toolSuccess, type ToolResult } from "../../errors/tool-result";
 import { hashBuffer } from "./hash";
+import { MIN_PDF_CHARS_PER_PAGE } from "../../config/limits";
 import type { ParsedDocument, SupportedMimeType } from "../../schemas/document.schema";
+
+export function isLowTextDensityPdf(charCount: number, pageCount: number): boolean {
+  return charCount / Math.max(pageCount, 1) < MIN_PDF_CHARS_PER_PAGE;
+}
 
 async function extractPdfText(buffer: Buffer): Promise<{ text: string; pageCount: number }> {
   const pdf = await getDocumentProxy(new Uint8Array(buffer));
@@ -53,6 +58,26 @@ export async function parseDocument(
               : "Não foi possível extrair texto deste documento.",
           isRetryable: false,
           operation: "parseDocument",
+        }),
+      );
+    }
+
+    if (
+      mimeType === "application/pdf" &&
+      pageCount !== undefined &&
+      isLowTextDensityPdf(trimmed.length, pageCount)
+    ) {
+      return toolFailure(
+        createAppError({
+          code: "LOW_TEXT_DENSITY_PDF",
+          category: "PARSING",
+          severity: "ERROR",
+          description: `Low text density in "${fileName}": ${trimmed.length} chars across ${pageCount} page(s) (below ${MIN_PDF_CHARS_PER_PAGE} chars/page)`,
+          userMessage:
+            "Este PDF parece conter páginas de imagem ou digitalizadas: foi extraído muito pouco texto para o número de páginas. Se o documento for escaneado, gere uma versão com OCR (texto selecionável) antes de enviar.",
+          isRetryable: false,
+          operation: "parseDocument",
+          metadata: { fileName, pageCount, extractedChars: trimmed.length },
         }),
       );
     }
