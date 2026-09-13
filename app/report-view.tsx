@@ -231,7 +231,10 @@ function ClaimSection({ title, claims }: { title: string; claims: ReportClaim[] 
  */
 function SourceLine({ source }: { source: ReportSource }) {
   return (
-    <span className="mt-1 block text-xs text-ink-600 dark:text-ink-400">
+    // `fonte-impressa`: no PDF a URL é escrita por extenso ao lado do link (regra em globals.css).
+    // No papel não se clica, e sem a URL a proveniência de HU-27 morre exatamente na exportação —
+    // que é quando o leitor está mais longe de conseguir conferir a citação.
+    <span className="fonte-impressa mt-1 block text-xs text-ink-600 dark:text-ink-400">
       {source.processNumber} · {source.chamber} · {source.judge} · {source.judgmentDate} ·{" "}
       <a
         href={source.url}

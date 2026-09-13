@@ -188,4 +188,104 @@
   .num {
     font-variant-numeric: tabular-nums;
   }
+
+  /* Contraparte de `@media print`: o que só existe no papel fica fora da tela.
+     O par das duas classes está documentado no bloco de impressão, no fim. */
+  .somente-impressao {
+    display: none;
+  }
+}
+
+/* ============================================================================
+   Impressão / exportação em PDF
+   ============================================================================
+
+   O "Exportar PDF" do resultado é `window.print()` sobre estas regras. Não há
+   biblioteca de PDF no projeto, e a escolha não foi só de custo: rasterizar a
+   tela (html2canvas e afins) produziria um PDF em que o texto não é
+   selecionável nem pesquisável — inaceitável num documento de que o advogado
+   precisa copiar citação e número de acórdão. Imprimindo, o texto continua
+   texto e os links continuam rastreáveis.
+
+   Duas classes comandam o que sai no papel:
+
+   - `.nao-imprimir` some. Navegação, formulário, botões, modal — tudo que só
+     existe para operar a aplicação.
+   - `.somente-impressao` aparece (fica oculto na tela). É o cabeçalho que
+     identifica o documento fora do navegador.
+
+   O aviso de HU-28 NÃO leva nenhuma das duas: ele imprime junto, de propósito.
+   Um relatório impresso é exatamente o que circula longe da tela onde a
+   ressalva estava. */
+@media print {
+  @page {
+    size: A4;
+    margin: 18mm 16mm 20mm 16mm;
+  }
+
+  .nao-imprimir {
+    display: none !important;
+  }
+
+  .somente-impressao {
+    display: block !important;
+  }
+
+  /* Tinta sobre papel: o creme e o navy são identidade de tela. No papel viram
+     toner gasto e texto com menos contraste — e a maioria dos navegadores
+     descarta fundo na impressão de qualquer forma, o que deixaria texto claro
+     sobre branco. */
+  body {
+    background: #fff;
+    color: #000;
+    font-size: 10.5pt;
+    line-height: 1.45;
+  }
+
+  /* Sem sombra e sem fundo: a estrutura passa a ser carregada pela borda. */
+  .rounded-card,
+  [class*="bg-vn-superficie"],
+  [class*="bg-vn-papel"] {
+    background: #fff !important;
+    box-shadow: none !important;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: underline;
+  }
+
+  /* No papel não se clica. A URL da fonte oficial precisa estar escrita, senão
+     a proveniência de HU-27 morre na exportação — que é justamente quando o
+     leitor está mais longe de conseguir conferir. */
+  .fonte-impressa a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 8pt;
+    word-break: break-all;
+  }
+
+  /* `<details>` fechado não imprime conteúdo. As omissões de HU-27 precisam
+     sair: são a resposta a "por que isso não aparece". */
+  details > *:not(summary) {
+    display: block !important;
+  }
+
+  /* Não separar um precedente da citação que o sustenta, nem um título do
+     bloco que ele abre. */
+  section,
+  article > div,
+  li {
+    break-inside: avoid;
+  }
+
+  h1,
+  h2,
+  h3 {
+    break-after: avoid;
+  }
+
+  /* Tabela longa repete o cabeçalho em cada página. */
+  thead {
+    display: table-header-group;
+  }
 }

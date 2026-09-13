@@ -19,6 +19,7 @@ import { Rotulo } from "@/components/ui/rotulo";
 import { Marcador } from "@/components/ui/marcador";
 import { Dropzone } from "@/components/ui/dropzone";
 import { EscopoDaBusca, inicioDoPeriodo } from "@/components/envio/escopo-da-busca";
+import { CabecalhoImpressao } from "@/components/relatorio/cabecalho-impressao";
 
 type UploadSuccess = PipelineResultPayload;
 
@@ -146,6 +147,33 @@ export function UploadForm() {
 
   const [isN8nModalOpen, setIsN8nModalOpen] = useState(false);
 
+  /**
+   * Exportação em PDF via impressão do navegador, sobre o `@media print` de `globals.css`.
+   *
+   * Não há biblioteca de PDF no projeto e a escolha não é só de custo: rasterizar a tela produziria
+   * um arquivo em que o texto não é selecionável nem pesquisável — e este documento existe para o
+   * advogado copiar citação e número de acórdão dele.
+   *
+   * O título do documento vira o nome sugerido do arquivo na caixa de salvar. Sem isso o PDF sai
+   * como "localhost" ou como o título da aba, e o advogado recebe uma pasta de arquivos
+   * indistinguíveis. É restaurado no `afterprint` para a aba não ficar renomeada depois.
+   */
+  function exportarPdf() {
+    if (!result) return;
+
+    const tituloOriginal = document.title;
+    const base = result.fileName.replace(/\.[^.]+$/, "");
+    document.title = `Relatorio-${base}-${result.runId.slice(0, 8)}`;
+
+    const restaurar = () => {
+      document.title = tituloOriginal;
+      window.removeEventListener("afterprint", restaurar);
+    };
+    window.addEventListener("afterprint", restaurar);
+
+    window.print();
+  }
+
   // `buildPipelineProgress({})` devolve a mesma lista "tudo pendente" que antes era uma constante
   // duplicada à mão aqui — e que, de quebra, citava um stage inexistente (SCRATCHPAD_SELECTION).
   const displayProgress =
@@ -156,7 +184,8 @@ export function UploadForm() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+      {/* Envio, progresso e escopo operam a aplicação; no PDF seriam ruído antes do laudo. */}
+      <div className="nao-imprimir grid gap-6 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         {/* coluna principal — envio e execução */}
         <div className="flex flex-col gap-5">
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -285,12 +314,23 @@ export function UploadForm() {
 
       {result && (
         <div className="flex flex-col gap-6">
+          <CabecalhoImpressao
+            fileName={result.fileName}
+            reportId={result.runId}
+            geradoEm={result.report.generatedAt}
+          />
+
           <Cartao className="p-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <Rotulo>Documento processado</Rotulo>
-              <Botao type="button" variante="texto" onClick={() => setIsN8nModalOpen(true)}>
-                Visualizar orquestração
-              </Botao>
+              <div className="nao-imprimir flex flex-wrap gap-2">
+                <Botao type="button" variante="primaria" onClick={exportarPdf}>
+                  Exportar PDF
+                </Botao>
+                <Botao type="button" variante="texto" onClick={() => setIsN8nModalOpen(true)}>
+                  Visualizar orquestração
+                </Botao>
+              </div>
             </div>
 
             <p className="mt-3 text-apoio text-vn-texto">
@@ -336,7 +376,9 @@ export function UploadForm() {
               </div>
             )}
 
-            <details className="mt-4 border-t border-vn-borda pt-4">
+            {/* Fora do PDF: é o texto da própria peça do cliente, que quem recebe já tem —
+                dobraria o tamanho do arquivo sem acrescentar nada ao laudo. */}
+            <details className="nao-imprimir mt-4 border-t border-vn-borda pt-4">
               <summary className="cursor-pointer text-rotulo text-vn-texto-suave">
                 Ver prévia do texto sanitizado
               </summary>
@@ -350,14 +392,16 @@ export function UploadForm() {
         </div>
       )}
 
-      <N8nExecutionView
-        isOpen={isN8nModalOpen}
-        onClose={() => setIsN8nModalOpen(false)}
-        events={timelineEvents}
-        traceId={result?.traceId ?? liveRun?.traceId}
-        runId={result?.runId ?? liveRun?.runId}
-        isStreaming={isSubmitting}
-      />
+      <div className="nao-imprimir">
+        <N8nExecutionView
+          isOpen={isN8nModalOpen}
+          onClose={() => setIsN8nModalOpen(false)}
+          events={timelineEvents}
+          traceId={result?.traceId ?? liveRun?.traceId}
+          runId={result?.runId ?? liveRun?.runId}
+          isStreaming={isSubmitting}
+        />
+      </div>
     </div>
   );
 }
