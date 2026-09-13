@@ -1,16 +1,28 @@
+import Image from "next/image";
 import { Envelope } from "./envelope";
 
+/**
+ * Rodapé institucional: só a marca.
+ *
+ * A linha "JCE SA Brazil · Pesquisa de jurisprudência do TJPR" saiu por decisão do usuário
+ * (13/09/2026). O que ela dizia já está dito onde importa — o produto se apresenta na tela Sobre e
+ * o tribunal pesquisado aparece no relatório, ao lado dos achados. Repetir no rodapé de toda página
+ * era ruído, não informação.
+ *
+ * Centralizado porque sobrou um elemento só: à esquerda, uma logo sozinha lê como linha
+ * interrompida; no centro, lê como fecho.
+ */
 export function SiteFooter() {
   return (
-    <footer className="mt-24 bg-vn-navy-800 py-10 text-vn-texto-inverso">
-      <Envelope className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-2.5">
-          <span aria-hidden="true" className="inline-block h-5 w-regua bg-vn-acao" />
-          <span className="text-[15px] font-extrabold tracking-[-0.01em]">Data&nbsp;VênIA</span>
-        </div>
-        <p className="text-legenda text-vn-navy-300">
-          JCE SA Brazil · Pesquisa de jurisprudência do TJPR
-        </p>
+    <footer className="mt-24 bg-vn-navy-800 py-10">
+      <Envelope className="flex justify-center">
+        <Image
+          src="/logo-datavenia-clara.png"
+          alt="Data VênIA"
+          width={126}
+          height={26}
+          className="h-6 w-auto"
+        />
       </Envelope>
     </footer>
   );

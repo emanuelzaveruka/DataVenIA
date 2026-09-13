@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Envelope } from "./envelope";
@@ -31,12 +32,23 @@ export function SiteHeader() {
   return (
     <header className="sticky top-0 z-50 border-b-[3px] border-vn-acao bg-vn-navy-900">
       <Envelope className="flex flex-wrap items-center gap-x-4 gap-y-2 py-2.5">
-        <Link
-          href="/"
-          className="mr-2 flex items-center gap-2.5 text-[17px] font-extrabold tracking-[-0.01em] text-vn-creme hover:text-vn-creme"
-        >
-          <span aria-hidden="true" className="inline-block h-6 w-regua bg-vn-acao" />
-          <span>Data&nbsp;VênIA</span>
+        {/*
+          A versão "clara" do logotipo (creme + verde) é a que existe para fundo escuro. A "escura"
+          é navy sobre navy — sumiria metade da palavra.
+
+          `width`/`height` batem com a proporção real do arquivo (972x200) para o navegador reservar
+          o espaço antes de baixar a imagem: sem isso o menu pula quando a logo chega. `priority`
+          porque o cabeçalho está acima da dobra em todas as telas.
+        */}
+        <Link href="/" className="mr-2 flex items-center">
+          <Image
+            src="/logo-datavenia-clara.png"
+            alt="Data VênIA"
+            width={136}
+            height={28}
+            priority
+            className="h-7 w-auto"
+          />
         </Link>
 
         <nav aria-label="Navegação principal" className="flex flex-wrap items-center gap-1">
