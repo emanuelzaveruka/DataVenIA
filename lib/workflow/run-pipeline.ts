@@ -21,6 +21,12 @@ import {
   type PipelineProgressStep,
 } from "../observability/pipeline-progress";
 import { createGuardedExecution } from "../hooks/guarded-execution";
+import {
+  validateEvidenceHandoff,
+  validateReportHandoff,
+  validateSanitizationHandoff,
+  validateScratchpadBatchHandoff,
+} from "./handoff-validators";
 import { PIPELINE_VERSION, scratchpadVersions } from "../config/versions";
 import { MIN_VALID_SCRATCHPADS } from "../config/limits";
 import { createAppError, type AppError } from "../errors/app-error";
@@ -331,8 +337,10 @@ export async function* runPipeline(
   };
   yield { type: "stage", event: recorder.start("SANITIZING", "Sanitização PII (HU-05)", sanitizingDetail) };
   const tSan = Date.now();
-  const sanitized = await guardedExecution.run("sanitizeDocument", async () =>
-    sanitizeDocument(parsed.data.documentId, parsed.data.text),
+  const sanitized = await guardedExecution.run(
+    "sanitizeDocument",
+    async () => sanitizeDocument(parsed.data.documentId, parsed.data.text),
+    validateSanitizationHandoff({ documentId: parsed.data.documentId }),
   );
   if (sanitized.isError) {
     yield* failStage("SANITIZING", "Sanitização PII (HU-05)", tSan, sanitized.error, {
@@ -562,8 +570,13 @@ export async function* runPipeline(
   const tScratch = Date.now();
   const versions = scratchpadVersions(llmProvider);
   const scratchpadCache = createRepositoryScratchpadCache({ repository, runId, versions });
-  const scratchpadBatch = await guardedExecution.run("generateScratchpads", () =>
-    generateScratchpads(selected.data, llmProvider, jurisprudenceProvider, undefined, scratchpadCache, signal),
+  const scratchpadBatch = await guardedExecution.run(
+    "generateScratchpads",
+    () =>
+      generateScratchpads(selected.data, llmProvider, jurisprudenceProvider, undefined, scratchpadCache, signal),
+    validateScratchpadBatchHandoff({
+      selectedCandidateIds: selected.data.map((candidate) => candidate.item.id),
+    }),
   );
   if (scratchpadBatch.isError) {
     yield* failStage(
@@ -671,8 +684,10 @@ export async function* runPipeline(
   };
   yield { type: "stage", event: recorder.start("EVIDENCE_VERIFICATION", "Verificação de Evidências", evidenceDetail) };
   const tEv = Date.now();
-  const evidence = await guardedExecution.run("verifyEvidence", () =>
-    verifyEvidence(crossFile.data.analyses, scratchpadBatch.data.scratchpads, sourceProvider),
+  const evidence = await guardedExecution.run(
+    "verifyEvidence",
+    () => verifyEvidence(crossFile.data.analyses, scratchpadBatch.data.scratchpads, sourceProvider),
+    validateEvidenceHandoff({ scratchpads: scratchpadBatch.data.scratchpads }),
   );
   if (evidence.isError) {
     yield* failStage("EVIDENCE_VERIFICATION", "Verificação de Evidências", tEv, evidence.error, evidenceDetail);
@@ -718,13 +733,19 @@ export async function* runPipeline(
   yield { type: "stage", event: recorder.start("REPORT_GENERATION", "Geração de Relatório", reportDetail) };
   const tRep = Date.now();
   const evidencePolicy = enforceEvidencePolicy(crossFile.data.analyses, evidence.data.evidences);
-  const report = await guardedExecution.run("buildReport", async () =>
-    buildReport({
-      caseAnalysis: caseAnalysis.data,
-      analyses: evidencePolicy.analyses,
+  const report = await guardedExecution.run(
+    "buildReport",
+    async () =>
+      buildReport({
+        caseAnalysis: caseAnalysis.data,
+        analyses: evidencePolicy.analyses,
+        evidences: evidence.data.evidences,
+        scratchpads: scratchpadBatch.data.scratchpads,
+        policyDropped: evidencePolicy.dropped,
+      }),
+    validateReportHandoff({
       evidences: evidence.data.evidences,
       scratchpads: scratchpadBatch.data.scratchpads,
-      policyDropped: evidencePolicy.dropped,
     }),
   );
   if (report.isError) {

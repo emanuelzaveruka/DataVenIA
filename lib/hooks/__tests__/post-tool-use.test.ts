@@ -98,6 +98,59 @@ describe("postToolUse — telemetria (HU-31/HU-35)", () => {
   });
 });
 
+describe("postToolUse — segunda camada (§11.2)", () => {
+  const reject = createAppError({
+    code: "HANDOFF_CONTRACT_VIOLATED",
+    category: "INTERNAL",
+    severity: "ERROR",
+    description: "contagem não fecha com o artefato da etapa anterior",
+    isRetryable: false,
+  });
+
+  it("turns a success the validator rejects into a failure", () => {
+    const result = postToolUse(toolSuccess({ processed: 5 }), {
+      stage: "SCRATCHPAD_GENERATION",
+      toolName: "generateScratchpads",
+      recorder: createExecutionRecorder({ traceId: "t", workflowId: "w" }),
+      validator: () => reject,
+    });
+
+    expect(result.isError).toBe(true);
+    if (result.isError) expect(result.error.code).toBe("HANDOFF_CONTRACT_VIOLATED");
+  });
+
+  it("logs the validated verdict, not the one the service returned", () => {
+    const recorder = createExecutionRecorder({ traceId: "t", workflowId: "w" });
+
+    postToolUse(toolSuccess({ processed: 5 }), {
+      stage: "SCRATCHPAD_GENERATION",
+      toolName: "generateScratchpads",
+      recorder,
+      validator: () => reject,
+    });
+
+    expect(recorder.logs).toHaveLength(1);
+    expect(recorder.logs[0]).toMatchObject({
+      success: false,
+      errorCode: "HANDOFF_CONTRACT_VIOLATED",
+    });
+  });
+
+  it("never hands a failed result to the validator", () => {
+    const validator = vi.fn(() => reject);
+
+    const result = postToolUse(failure, {
+      stage: "SEARCH",
+      toolName: "searchJurisprudence",
+      recorder: createExecutionRecorder({ traceId: "t", workflowId: "w" }),
+      validator,
+    });
+
+    expect(validator).not.toHaveBeenCalled();
+    expect(result).toBe(failure);
+  });
+});
+
 describe("createGuardedExecution (HU-31)", () => {
   it("executes and records a tool allowed in the current stage", async () => {
     const recorder = createExecutionRecorder({ traceId: "trace-1", workflowId: "run-1" });
@@ -113,6 +166,36 @@ describe("createGuardedExecution (HU-31)", () => {
     expect(operation).toHaveBeenCalledTimes(1);
     expect(recorder.logs).toHaveLength(1);
     expect(recorder.logs[0]).toMatchObject({ toolName: "validateFile", success: true });
+  });
+
+  it("fails the call when the validator rejects the payload, with a single log line", async () => {
+    const recorder = createExecutionRecorder({ traceId: "trace-3", workflowId: "run-3" });
+    const guarded = createGuardedExecution({
+      getStage: () => "SCRATCHPAD_GENERATION",
+      recorder,
+    });
+
+    const result = await guarded.run(
+      "generateScratchpads",
+      async () => toolSuccess({ processed: 5 }),
+      () =>
+        createAppError({
+          code: "HANDOFF_CONTRACT_VIOLATED",
+          category: "INTERNAL",
+          severity: "ERROR",
+          description: "processed não corresponde aos scratchpads devolvidos",
+          isRetryable: false,
+        }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(recorder.logs).toHaveLength(1);
+    expect(recorder.logs[0]).toMatchObject({
+      toolName: "generateScratchpads",
+      attempt: 1,
+      success: false,
+      errorCode: "HANDOFF_CONTRACT_VIOLATED",
+    });
   });
 
   it("blocks a tool outside the current stage before running the operation", async () => {
