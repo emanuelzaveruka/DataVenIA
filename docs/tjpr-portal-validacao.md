@@ -110,6 +110,36 @@ Faça em um navegador comum, logado em nada, sem extensão de automação.
   - `https://portal.tjpr.jus.br/jurisprudencia/promo/nenhum-registro/dados-estaticos.html?updateIdx=31`
     responde HTTP 200, mas é uma tabela estática de precedentes interamericanos/promocionais e não
     revelou parâmetros de paginação da busca jurisprudencial.
+- **Sintaxe da pesquisa livre (`criterioPesquisa`), medida em 2026-09-13** — motivada por um artigo
+  externo (juit.com.br/blog/tj-pr-jurisprudencia-consulta) que descreve o operador `E` e aspas para
+  frase exata; os pontos abaixo foram checados contra o portal real, não assumidos do artigo:
+  - **Bug de encoding real, corrigido em `lib/providers/tjpr.ts`**: o endpoint decodifica
+    `criterioPesquisa` (e por extensão os demais parâmetros de texto) como **ISO-8859-1**, apesar de
+    a resposta declarar `charset=UTF-8`. `sa%C3%BAde` (UTF-8 percent-encoding de "saúde") volta
+    ecoado como mojibake (`saÃºde`) no próprio campo do formulário e a busca dá **0 resultados**;
+    `sa%FAde` (ISO-8859-1) ecoa "saúde" corretamente e bate exatamente a contagem da versão sem
+    acento (243 nos dois). Reproduzido também com "indenização" (0 vs. 2442, idêntico à versão sem
+    acento). Como `URLSearchParams`/`URL` do JS sempre codificam em UTF-8 e não têm opção de trocar,
+    `buildSearchUrl` monta a query string da busca à mão com um encoder ISO-8859-1 próprio — a
+    query-generation (HU-11) já evita acentos nos exemplos do prompt, mas isso não é garantia (LLM
+    pode gerar "saúde", "indenização" etc.), então depender só do prompt deixaria o bug intermitente
+    e silencioso (0 resultados sem erro). A URL de decisão individual (`/jurisprudencia/j/{id}/...`)
+    é outro endpoint e usa UTF-8 normalmente — não mexi nela, já estava validada.
+  - **Termos entre aspas** (`"plano de saude"`) funcionam como frase exata e mudam a contagem
+    (243 sem aspas em "plano saude" vs. 183 com aspas em `"plano de saude"` — são buscas diferentes,
+    não um simples refinamento).
+  - **Armadilha: múltiplas frases entre aspas combinadas viram AND rígido de substring exata.**
+    `"plano de saude" "negativa cobertura"` deu **0 resultados** (não é erro de sintaxe — o HTML
+    ecoa o valor normalmente) porque decisões reais quase nunca escrevem "negativa cobertura" sem a
+    preposição ("negativa **de** cobertura" é o normal). Cada aspas a mais é uma chance de falso
+    negativo silencioso. **Implicação para HU-11**: o prompt de query-generation já usa keywords
+    curtas sem aspas e sem conectores (`de/da/do/em/para`) — isso já evita essa armadilha por
+    acidente de design, e por isso **não** virou uma mudança de prompt: adicionar aspas para
+    "precisão" trocaria o risco atual (resultado amplo, mitigado pelo funil de HU-13) por um risco
+    pior (resultado vazio sem sinalização).
+  - Operador `E` explícito entre termos soltos funciona e restringe como esperado
+    (`plano saude E negativa cobertura` → 80, menos que `plano saude` sozinho → 243), mas não supera
+    em nada a busca space-separated que já usamos — não há motivo para adicionar `E` ao prompt.
 - Sessão / cookies / CSRF / rate limit observado: a resposta define `JSESSIONID`, mas a busca e a
   decisão abriram sem login, CAPTCHA ou token CSRF na validação inicial. Rate limit não validado.
 - Termos de uso — restrição a reuso automatizado: pendente de validação manual.

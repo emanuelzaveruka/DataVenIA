@@ -86,6 +86,22 @@ describe("TjprProvider", () => {
     expect(requestedUrl.searchParams.get("criterioPesquisa")).toBe("plano de saude");
   });
 
+  it("encodes accented search terms as ISO-8859-1, not UTF-8", async () => {
+    // Medido contra o portal em 2026-09-13: ele decodifica criterioPesquisa como ISO-8859-1 mesmo
+    // declarando charset=UTF-8 na resposta. UTF-8 percent-encoding vira mojibake lá e a busca some
+    // (0 resultados) para qualquer termo acentuado — "saúde", "indenização" etc.
+    const fetchImpl = vi.fn<typeof fetch>(async () => htmlResponse(searchHtml));
+    const provider = createTjprProvider({ baseUrl: "https://portal.tjpr.jus.br", fetchImpl });
+
+    await provider.search({ query: "plano saúde indenização" });
+
+    const requestedUrl = String(fetchImpl.mock.calls[0]?.[0]);
+    // "ú" = U+00FA -> ISO-8859-1 %FA; "ç" = U+00E7 -> %E7; "ã" = U+00E3 -> %E3.
+    expect(requestedUrl).toContain("criterioPesquisa=plano%20sa%FAde%20indeniza%E7%E3o");
+    expect(requestedUrl).not.toContain("%C3%BA");
+    expect(requestedUrl).not.toContain("%C3%A7");
+  });
+
   it("reopens decisions through the canonical URL discovered by search", async () => {
     const fetchImpl = vi
       .fn<typeof fetch>()

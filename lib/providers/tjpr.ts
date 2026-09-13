@@ -205,18 +205,48 @@ function toBrazilianDate(value: string | undefined): string | undefined {
   return `${match[3]}/${match[2]}/${match[1]}`;
 }
 
+const LATIN1_UNRESERVED = /[A-Za-z0-9\-_.!~*'()]/;
+
+/**
+ * O endpoint de busca (`pesquisa.do`) decodifica `criterioPesquisa` e os demais parâmetros de texto
+ * como ISO-8859-1, não UTF-8 — apesar da resposta declarar `charset=UTF-8`. Medido em 2026-09-13:
+ * "saúde" percent-encoded em UTF-8 (`sa%C3%BAde`) volta ecoado como mojibake (`saÃºde`) no próprio
+ * formulário e a busca dá 0 resultados; o mesmo termo em ISO-8859-1 (`sa%FAde`) ecoa corretamente e
+ * bate exatamente a contagem da versão sem acento (243 em ambos). `URLSearchParams`/`URL` sempre
+ * codificam em UTF-8 e não têm opção de trocar, por isso a query string da busca é montada à mão
+ * aqui. (A URL de decisão individual — `decisionUrl` abaixo — é outro endpoint e usa UTF-8
+ * normalmente; isso foi validado à parte em `docs/tjpr-portal-validacao.md`.)
+ */
+function encodeLatin1QueryValue(value: string): string {
+  let result = "";
+  for (const char of value) {
+    const codePoint = char.codePointAt(0) ?? 0;
+    if (LATIN1_UNRESERVED.test(char)) {
+      result += char;
+    } else if (codePoint <= 0xff) {
+      result += `%${codePoint.toString(16).toUpperCase().padStart(2, "0")}`;
+    } else {
+      // Fora do alcance de ISO-8859-1 (ex.: CJK, emoji): não há equivalente correto no charset do
+      // portal, então cai para UTF-8 padrão em vez de descartar o caractere silenciosamente.
+      result += encodeURIComponent(char);
+    }
+  }
+  return result;
+}
+
 function buildSearchUrl(
   query: JurisprudenceQuery,
   baseUrl: string,
   options?: { pagination?: { config: TjprPaginationConfig; page: number }; tipoDecisao?: string },
 ): string {
   const pagination = options?.pagination;
-  const url = new URL("/jurisprudencia/publico/pesquisa.do", baseUrl);
-  url.searchParams.set("actionType", "pesquisar");
-  url.searchParams.set("criterioPesquisa", query.query);
-  url.searchParams.set("ambito", "7");
-  url.searchParams.set("idLocalPesquisa", "1");
-  url.searchParams.set("segredoJustica", "pesquisar com");
+  const params: Array<[string, string]> = [
+    ["actionType", "pesquisar"],
+    ["criterioPesquisa", query.query],
+    ["ambito", "7"],
+    ["idLocalPesquisa", "1"],
+    ["segredoJustica", "pesquisar com"],
+  ];
 
   // `idsTipoDecisaoSelecionados` é um filtro de verdade, e o valor `3` que estava fixo aqui era o
   // errado: medido contra o portal em 2026-09-13, `plano de saude` devolve 62 registros com `3` —
@@ -226,35 +256,37 @@ function buildSearchUrl(
   // descobrir por tentativa e erro; até lá, o padrão é não filtrar, que é o recorte mais amplo e o
   // único que não exclui jurisprudência de mérito por engano.
   if (options?.tipoDecisao) {
-    url.searchParams.set("idsTipoDecisaoSelecionados", options.tipoDecisao);
+    params.push(["idsTipoDecisaoSelecionados", options.tipoDecisao]);
   }
 
   if (query.filters?.periodStart) {
-    url.searchParams.set("dataJulgamentoInicio", toBrazilianDate(query.filters.periodStart) ?? query.filters.periodStart);
+    params.push(["dataJulgamentoInicio", toBrazilianDate(query.filters.periodStart) ?? query.filters.periodStart]);
   }
   if (query.filters?.periodEnd) {
-    url.searchParams.set("dataJulgamentoFim", toBrazilianDate(query.filters.periodEnd) ?? query.filters.periodEnd);
+    params.push(["dataJulgamentoFim", toBrazilianDate(query.filters.periodEnd) ?? query.filters.periodEnd]);
   }
   if (query.filters?.judgingBody) {
-    url.searchParams.set("nomeOrgaoJulgador", query.filters.judgingBody);
+    params.push(["nomeOrgaoJulgador", query.filters.judgingBody]);
   }
   if (query.filters?.judge) {
-    url.searchParams.set("nomeRelator", query.filters.judge);
+    params.push(["nomeRelator", query.filters.judge]);
   }
 
   // Só entra na URL quando o nome do parâmetro é conhecido. Sem ele, a única página pedível é a
   // que o portal serve por padrão — e é melhor buscar uma página honestamente do que três iguais.
   if (pagination?.config.pageSizeParam) {
-    url.searchParams.set(pagination.config.pageSizeParam, String(pagination.config.pageSize));
+    params.push([pagination.config.pageSizeParam, String(pagination.config.pageSize)]);
   }
   if (pagination?.config.pageParam) {
-    url.searchParams.set(
+    params.push([
       pagination.config.pageParam,
       String(pagination.config.firstPageIndex + pagination.page),
-    );
+    ]);
   }
 
-  return url.toString();
+  const base = new URL("/jurisprudencia/publico/pesquisa.do", baseUrl).toString();
+  const queryString = params.map(([key, value]) => `${key}=${encodeLatin1QueryValue(value)}`).join("&");
+  return `${base}?${queryString}`;
 }
 
 async function fetchHtml(fetchImpl: typeof fetch, url: string, operation: string): Promise<ToolResult<string>> {
