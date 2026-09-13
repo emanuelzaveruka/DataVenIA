@@ -30,7 +30,9 @@ export const MIN_VALID_SCRATCHPADS = 3;
  * Tamanho do pool de execução concorrente da geração de Scratchpads (HU-17/§3.7: "3 a 5 workers
  * é a sugestão inicial", sem fila distribuída).
  */
-export const SCRATCHPAD_CONCURRENCY = 4;
+export const SCRATCHPAD_CONCURRENCY = process.env.SCRATCHPAD_CONCURRENCY
+  ? Number(process.env.SCRATCHPAD_CONCURRENCY)
+  : 12;
 
 /**
  * Limiar de aceitação "near-literal" na verificação de evidências (HU-24): fração mínima de tokens
