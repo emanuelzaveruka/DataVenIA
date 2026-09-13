@@ -32,9 +32,10 @@ export const ISSUE_CLASSIFICATIONS = [
 export type IssueClassification = (typeof ISSUE_CLASSIFICATIONS)[number];
 
 /**
- * Provenance mínima de qualquer achado exibido (HU-26 validação / HU-27 / critério de aceite 12).
- * Todos os campos são obrigatórios: um item sem Câmara, relator, data ou URL oficial não pode ser
- * mostrado, então nem chega a existir como objeto válido.
+ * Provenance exibida em qualquer achado (HU-26 / HU-27 / critério de aceite 12). O objeto sempre
+ * carrega os campos que a UI espera renderizar; quando o TJPR não entrega algum metadado, a camada
+ * de relatório preenche explicitamente como "Não informado". A exigência rígida fica em URL oficial
+ * e citação verificada, que são o núcleo da rastreabilidade.
  */
 export const ReportSourceSchema = z.object({
   processNumber: z.string().min(1),

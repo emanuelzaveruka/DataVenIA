@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { generateScratchpads } from "../generate-scratchpads";
+import { generateScratchpads, type ScratchpadProgressEvent } from "../generate-scratchpads";
 import { parseStructuredOutput } from "../../../llm/validate-structured-output";
 import type { GenerateStructuredParams, LlmProvider } from "../../../llm/provider";
 import type { JurisprudenceProvider } from "../../../providers/jurisprudence-provider";
 import type { RankedCandidate, RawDecision } from "../../../schemas/search.schema";
 import { toolFailure, toolSuccess } from "../../../errors/tool-result";
 import { createAppError } from "../../../errors/app-error";
+import type { ScratchpadCache } from "../../../persistence/scratchpad-cache";
+import type { DecisionScratchpad } from "../../../schemas/scratchpad.schema";
 
 /**
  * Chaveado por `candidate.item.id`, extraído do prompt via o marcador estável
@@ -172,10 +174,142 @@ describe("generateScratchpads", () => {
       }),
     };
 
-    const result = await generateScratchpads(candidates, provider, jurisprudenceProvider, 2);
+    const result = await generateScratchpads(candidates, provider, jurisprudenceProvider, { concurrency: 2 });
 
     expect(result.isError).toBe(false);
     expect(peak).toBeLessThanOrEqual(2);
     expect(peak).toBeGreaterThan(1);
+  });
+
+  it("relata cada decisão no momento em que ela começa e termina", async () => {
+    const ids = ["fixture-0", "fixture-1", "fixture-2"];
+    const candidates = ids.map(rankedCandidate);
+    const provider = fakeProviderKeyedById({
+      "fixture-0": [validContent],
+      "fixture-1": [validContent],
+      // Esgota as três tentativas do retry e termina como falha de schema (HU-17).
+      "fixture-2": [invalidContent, invalidContent, invalidContent],
+    });
+    const jurisprudenceProvider = fakeJurisprudenceProvider(ids);
+
+    const events: ScratchpadProgressEvent[] = [];
+    const result = await generateScratchpads(candidates, provider, jurisprudenceProvider, {
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(result.isError).toBe(false);
+    expect(events.filter((event) => event.type === "STARTED")).toHaveLength(3);
+
+    expect(events.filter((event) => event.type === "FETCHING")).toHaveLength(3);
+    expect(events.filter((event) => event.type === "GENERATING")).toHaveLength(3);
+
+    const concluidos = events.filter((event) => event.type === "FINISHED" || event.type === "FAILED");
+    expect(concluidos).toHaveLength(3);
+
+    // Toda decisão que começou também terminou: é o que impede o painel de ficar com um item
+    // "em andamento" para sempre depois que o lote acabou.
+    for (const id of ids) {
+      expect(events.some((event) => event.type === "STARTED" && event.candidateId === id)).toBe(true);
+      expect(
+        events.some(
+          (event) => (event.type === "FINISHED" || event.type === "FAILED") && event.candidateId === id,
+        ),
+      ).toBe(true);
+    }
+
+    const falha = events.find((event) => event.type === "FAILED");
+    expect(falha?.candidateId).toBe("fixture-2");
+    expect(falha?.type === "FAILED" && falha.error.code).toBe("INVALID_SCRATCHPAD_SCHEMA");
+
+    const sucesso = events.find((event) => event.type === "FINISHED");
+    expect(sucesso?.type === "FINISHED" && sucesso.status).toBe("VALID");
+    expect(sucesso?.type === "FINISHED" && sucesso.source).toBe("model");
+    expect(sucesso?.type === "FINISHED" && sucesso.timing?.modelMs).toEqual(expect.any(Number));
+  });
+
+  it("serve cache hit sem chamar fetchDecision nem modelo", async () => {
+    const candidate = rankedCandidate("fixture-cache");
+    const cachedScratchpad = {
+      ...validContent,
+      scratchpadId: "SP-cache",
+      schemaVersion: "1.0.0",
+      source: {
+        provider: "TJPR",
+        sourceId: candidate.item.id,
+        url: candidate.item.url,
+        court: "TJPR",
+        chamber: candidate.item.chamber,
+        sourceHash: "a".repeat(64),
+      },
+      evidenceCandidates: [],
+    } as DecisionScratchpad;
+    const cache: ScratchpadCache = {
+      find: vi.fn(async () => cachedScratchpad),
+      save: vi.fn(),
+    };
+    const provider = fakeProviderKeyedById({ "fixture-cache": [validContent] });
+    const jurisprudenceProvider = fakeJurisprudenceProvider(["fixture-cache"]);
+    const events: ScratchpadProgressEvent[] = [];
+
+    const result = await generateScratchpads([candidate], provider, jurisprudenceProvider, {
+      cache,
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(result.isError).toBe(false);
+    expect(jurisprudenceProvider.fetchDecision).not.toHaveBeenCalled();
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+    expect(cache.save).not.toHaveBeenCalled();
+    expect(events.map((event) => event.type)).toEqual(["STARTED", "FINISHED"]);
+    const finished = events.find((event) => event.type === "FINISHED");
+    expect(finished?.type === "FINISHED" && finished.source).toBe("cache");
+  });
+
+  it("limita chamadas LLM separadamente da busca da decisão", async () => {
+    const ids = Array.from({ length: 5 }, (_, i) => `fixture-${i}`);
+    const candidates = ids.map(rankedCandidate);
+    let llmInFlight = 0;
+    let llmPeak = 0;
+    const provider: LlmProvider = {
+      name: "fake",
+      model: "fake-model",
+      generateStructured: vi.fn(async (params: GenerateStructuredParams<unknown>) => {
+        llmInFlight += 1;
+        llmPeak = Math.max(llmPeak, llmInFlight);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        llmInFlight -= 1;
+        return parseStructuredOutput(params.schema, params.schemaName, validContent, "fake");
+      }) as unknown as LlmProvider["generateStructured"],
+    };
+    const jurisprudenceProvider = fakeJurisprudenceProvider(ids);
+
+    const result = await generateScratchpads(candidates, provider, jurisprudenceProvider, {
+      concurrency: 5,
+      fetchConcurrency: 5,
+      llmConcurrency: 2,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(llmPeak).toBeLessThanOrEqual(2);
+    expect(llmPeak).toBeGreaterThan(1);
+  });
+
+  it("não deixa um listener de progresso quebrado derrubar o lote", async () => {
+    const ids = ["fixture-0", "fixture-1"];
+    const candidates = ids.map(rankedCandidate);
+    const provider = fakeProviderKeyedById(Object.fromEntries(ids.map((id) => [id, [validContent]])));
+    const jurisprudenceProvider = fakeJurisprudenceProvider(ids);
+
+    const result = await generateScratchpads(candidates, provider, jurisprudenceProvider, {
+      onEvent: () => {
+        throw new Error("observabilidade quebrada");
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    if (!result.isError) {
+      expect(result.data.processed).toBe(2);
+      expect(result.data.failed).toBe(0);
+    }
   });
 });

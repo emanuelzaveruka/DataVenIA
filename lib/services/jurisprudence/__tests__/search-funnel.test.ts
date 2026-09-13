@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applySearchFunnel } from "../search-funnel";
-import { RAW_SEARCH_RESULTS_CAP } from "../../../config/limits";
+import { BROAD_SEARCH_WARNING_THRESHOLD } from "../../../config/limits";
 import type { JurisprudenceSearchItem, JurisprudenceSearchResult } from "../../../schemas/search.schema";
 
 function fakeItem(id: string): JurisprudenceSearchItem {
@@ -13,37 +13,31 @@ function fakeItem(id: string): JurisprudenceSearchItem {
 }
 
 describe("applySearchFunnel (HU-13)", () => {
-  it("passes through results within rawSearchResultsCap", () => {
+  it("passes through collected items and marks a narrow result as not broad", () => {
     const items = [fakeItem("1"), fakeItem("2")];
     const result: JurisprudenceSearchResult = { items, totalCount: items.length };
 
     const funnelResult = applySearchFunnel(result);
 
-    expect(funnelResult.isError).toBe(false);
-    if (!funnelResult.isError) {
-      expect(funnelResult.data).toEqual(items);
-    }
+    expect(funnelResult.items).toEqual(items);
+    expect(funnelResult.broad).toBe(false);
   });
 
-  it("blocks and asks for filters when totalCount exceeds the cap (real case: 3.970 for 'plano de saúde')", () => {
-    const result: JurisprudenceSearchResult = { items: [], totalCount: 3970 };
+  it("marks broad searches as a warning instead of blocking the run", () => {
+    const items = [fakeItem("1")];
+    const result: JurisprudenceSearchResult = { items, totalCount: 3970 };
 
     const funnelResult = applySearchFunnel(result);
 
-    expect(funnelResult.isError).toBe(true);
-    if (funnelResult.isError) {
-      expect(funnelResult.error.code).toBe("SEARCH_RESULTS_EXCEED_CAP");
-      expect(funnelResult.error.category).toBe("BUSINESS_RULE");
-      expect(funnelResult.error.isRetryable).toBe(false);
-      expect(funnelResult.error.metadata).toEqual({ totalCount: 3970, cap: RAW_SEARCH_RESULTS_CAP });
-    }
+    expect(funnelResult.items).toEqual(items);
+    expect(funnelResult.broad).toBe(true);
   });
 
-  it("treats a result exactly at the cap as acceptable (boundary)", () => {
-    const result: JurisprudenceSearchResult = { items: [], totalCount: RAW_SEARCH_RESULTS_CAP };
+  it("treats a result exactly at the broad threshold as not broad (boundary)", () => {
+    const result: JurisprudenceSearchResult = { items: [], totalCount: BROAD_SEARCH_WARNING_THRESHOLD };
 
     const funnelResult = applySearchFunnel(result);
 
-    expect(funnelResult.isError).toBe(false);
+    expect(funnelResult.broad).toBe(false);
   });
 });

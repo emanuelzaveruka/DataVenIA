@@ -24,17 +24,16 @@ describe("suggestSearchTerms", () => {
   it("sugere as citações legais da peça", () => {
     const termos = suggestSearchTerms(PETICAO);
 
-    expect(termos).toContain("art. 51 do CDC");
-    expect(termos).toContain("Lei 9.656/1998");
-    expect(termos).toContain("Súmula 608 do STJ");
+    expect(termos).toContain("art 51 CDC");
+    expect(termos).toContain("lei 9.656/1998");
+    expect(termos).toContain("sumula 608 STJ");
   });
 
-  it("sugere a matéria recorrente, com o conector no meio preservado", () => {
+  it("sugere a matéria recorrente em keywords compatíveis com o TJPR", () => {
     const termos = suggestSearchTerms(PETICAO, 20).map((termo) => termo.toLowerCase());
 
-    // Sem tratar o conector, isto viraria "negativa" e "cobertura" soltos — inúteis como busca.
-    expect(termos).toContain("negativa de cobertura");
-    expect(termos).toContain("plano de saúde");
+    expect(termos).toContain("negativa cobertura");
+    expect(termos).toContain("plano saude");
   });
 
   it("nunca devolve marcador de sanitização como termo de busca", () => {

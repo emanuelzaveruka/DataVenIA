@@ -29,6 +29,26 @@ export const EvidenceCandidateSchema = z.object({
 });
 export type EvidenceCandidate = z.infer<typeof EvidenceCandidateSchema>;
 
+/**
+ * O que o modelo produz: o trecho, sem o `id`. Pela mesma razão do `id` da questão jurídica
+ * (`case-analysis.schema.ts`), o identificador é atribuído em código: é por ele que a análise
+ * cruzada aponta a citação que sustenta um risco (HU-23) e que a verificação reabre a fonte
+ * (HU-24), e um id inventado a cada execução não dá ao modelo seguinte nenhum padrão a seguir.
+ */
+export const EvidenceCandidateContentSchema = EvidenceCandidateSchema.omit({ id: true });
+export type EvidenceCandidateContent = z.infer<typeof EvidenceCandidateContentSchema>;
+
+/**
+ * `EV-<prefixo do scratchpad>-<n>`: único entre Scratchpads (o prefixo vem do `scratchpadId`, que
+ * é um UUID próprio de cada um) e visivelmente distinto de um `scratchpadId`, que é o outro
+ * identificador que circula no mesmo prompt. Derivar do `scratchpadId`, e não da posição da
+ * decisão no lote, é o que mantém a unicidade quando um Scratchpad vem do cache de HU-33 e outro é
+ * gerado agora.
+ */
+export function evidenceCandidateId(scratchpadId: string, index: number): string {
+  return `EV-${scratchpadId.replace(/-/g, "").slice(0, 6)}-${index + 1}`;
+}
+
 export const RelevanceSchema = z.object({
   score: z.number(),
   reason: z.string().min(1),
@@ -67,7 +87,7 @@ const ScratchpadContentShape = z.object({
   distinguishingFacts: z.array(z.string()),
   citedLaws: z.array(z.string()),
   citedPrecedents: z.array(z.string()),
-  evidenceCandidates: z.array(EvidenceCandidateSchema),
+  evidenceCandidates: z.array(EvidenceCandidateContentSchema),
   confidence: z.number().min(0).max(1),
   status: z.enum(SCRATCHPAD_STATUSES),
 });
@@ -102,6 +122,9 @@ const ScratchpadShape = ScratchpadContentShape.extend({
   scratchpadId: z.string().min(1),
   schemaVersion: z.string().min(1),
   source: ScratchpadSourceSchema,
+  // Os trechos voltam aqui com o `id` que `generateScratchpad` atribuiu — mesma relação de
+  // `source` e `scratchpadId` com o conteúdo do modelo.
+  evidenceCandidates: z.array(EvidenceCandidateSchema),
 });
 
 export const ScratchpadSchema = ScratchpadShape.superRefine(rejectEmptyHoldingsWhenValid);

@@ -4,6 +4,7 @@ import {
   buildCrossFileAnalysisResponseSchema,
   type CrossFileAnalysis,
   type CrossFileAnalysisResponse,
+  type CrossFileOppositionGuard,
   type CrossFileReferenceContext,
 } from "../../schemas/cross-file.schema";
 import type { LlmProvider } from "../../llm/provider";
@@ -20,6 +21,16 @@ export interface CrossFileAnalysisResult {
    * precedente contrário foi identificado na amostra, em vez de simplesmente não exibir a seção.
    */
   opposingPrecedentsFound: boolean;
+  warnings?: string[];
+}
+
+const OPPOSITION_GUARD_WARNING =
+  "A amostra contém holdings OPPOSES/MIXED, mas a análise cruzada não apontou decisões contrárias ou mistas. O relatório seguirá com aviso em vez de bloquear a execução.";
+
+function oppositionGuardFromEnv(env: Partial<NodeJS.ProcessEnv> = process.env): CrossFileOppositionGuard {
+  const configured = env.CROSS_FILE_OPPOSITION_GUARD?.trim().toLowerCase();
+  if (configured === "strict") return "strict";
+  return "warn";
 }
 
 /**
@@ -104,11 +115,12 @@ export async function analyzeCrossFile(
   }
 
   const context = buildReferenceContext(caseAnalysis, validScratchpads);
+  const oppositionGuard = oppositionGuardFromEnv();
 
   const result = await generateStructuredWithRetry<CrossFileAnalysisResponse>(provider, {
     system: CROSS_FILE_SYSTEM_PROMPT,
     prompt: buildCrossFilePrompt(caseAnalysis, validScratchpads),
-    schema: buildCrossFileAnalysisResponseSchema(context),
+    schema: buildCrossFileAnalysisResponseSchema(context, { oppositionGuard }),
     schemaName: "CrossFileAnalysis",
     schemaDescription:
       "Análise cruzada dos Scratchpads válidos, uma entrada por questão jurídica do caso.",
@@ -143,8 +155,15 @@ export async function analyzeCrossFile(
     );
   }
 
+  const opposingPrecedentsFound = hasOpposingPrecedents(result.data.analyses);
+  const warnings =
+    oppositionGuard === "warn" && context.hasOpposingHoldings && !opposingPrecedentsFound
+      ? [OPPOSITION_GUARD_WARNING]
+      : undefined;
+
   return toolSuccess({
     analyses: result.data.analyses,
-    opposingPrecedentsFound: hasOpposingPrecedents(result.data.analyses),
+    opposingPrecedentsFound,
+    warnings,
   });
 }

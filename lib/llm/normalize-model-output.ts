@@ -23,6 +23,8 @@ interface ZodDef {
   shape?: Record<string, unknown>;
   element?: unknown;
   innerType?: unknown;
+  in?: unknown;
+  out?: unknown;
 }
 
 function defOf(schema: unknown): ZodDef | undefined {
@@ -46,6 +48,10 @@ function unwrap(schema: unknown): Unwrapped {
 
   for (let depth = 0; depth < 10; depth++) {
     const def = defOf(current);
+    if (def?.type === "pipe") {
+      current = def.out;
+      continue;
+    }
     if (!def?.type || !TRANSPARENT_WRAPPERS.has(def.type)) return { def, optional };
     if (def.type === "optional" || def.type === "default" || def.type === "prefault") optional = true;
     current = def.innerType;

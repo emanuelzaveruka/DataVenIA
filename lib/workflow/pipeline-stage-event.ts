@@ -53,6 +53,18 @@ export interface StageRecorder {
    * resposta sempre carregou — um `RUNNING` sobrevivente ali seria um nó que nunca terminou.
    */
   start(stage: string, label: string, detail?: Partial<NodeExecutionDetail>): PipelineStageEvent;
+  /**
+   * Atualização de um nó que **já começou** e ainda não terminou — o que uma etapa longa emite a
+   * cada item concluído. Difere de `start` em um ponto só, e é o ponto: recebe o instante real de
+   * início, de modo que a duração cresce a cada atualização em vez de voltar a zero. Como `start`,
+   * não acumula em `events`/`nodeDetails`.
+   */
+  progress(
+    stage: string,
+    label: string,
+    startedAt: number,
+    detail?: Partial<NodeExecutionDetail>,
+  ): PipelineStageEvent;
   record(
     stage: string,
     label: string,
@@ -119,6 +131,20 @@ export function createStageRecorder(): StageRecorder {
       );
 
       return { stage, label, status: "RUNNING", durationMs: 0, nodeDetail };
+    },
+
+    progress(stage, label, startedAt, detail) {
+      const nodeDetail = buildNodeDetail(
+        stage,
+        label,
+        "RUNNING",
+        startedAt,
+        Date.now(),
+        events.length + 1,
+        detail,
+      );
+
+      return { stage, label, status: "RUNNING", durationMs: nodeDetail.durationMs, nodeDetail };
     },
 
     record(stage, label, status, startedAt, detail) {

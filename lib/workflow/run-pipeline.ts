@@ -8,7 +8,11 @@ import { generateSearchQueries } from "../services/query-generation/generate-que
 import { applySearchFunnel } from "../services/jurisprudence/search-funnel";
 import { buildPreRankingContext, rankCandidates } from "../services/jurisprudence/pre-rank";
 import { selectForScratchpad } from "../services/jurisprudence/select-candidates";
-import { generateScratchpads } from "../services/scratchpad/generate-scratchpads";
+import { normalizeTjprKeywordQuery } from "../services/jurisprudence/normalize-query";
+import {
+  generateScratchpads,
+  type ScratchpadBatchResult,
+} from "../services/scratchpad/generate-scratchpads";
 import { analyzeCrossFile } from "../services/cross-file/analyze-cross-file";
 import { verifyEvidence } from "../services/evidence/verify-evidence";
 import { enforceEvidencePolicy } from "../services/evidence/enforce-evidence-policy";
@@ -16,16 +20,37 @@ import { buildReport } from "../services/report/build-report";
 import { createRepositoryScratchpadCache } from "../persistence/scratchpad-cache";
 import { createExecutionRecorder } from "../observability/execution-recorder";
 import {
+  createPipelineLogger,
+  NO_PIPELINE_LOG,
+  type PipelineLogger,
+} from "../observability/pipeline-logger";
+import {
   buildPipelineProgress,
   type PipelineProgressInput,
   type PipelineProgressStep,
 } from "../observability/pipeline-progress";
 import { createGuardedExecution } from "../hooks/guarded-execution";
 import { PIPELINE_VERSION, scratchpadVersions } from "../config/versions";
-import { MIN_VALID_SCRATCHPADS } from "../config/limits";
+import {
+  BROAD_SEARCH_WARNING_THRESHOLD,
+  MIN_VALID_SCRATCHPADS,
+  SCRATCHPAD_LIMIT,
+  SEARCH_CANDIDATE_LIMIT,
+  SEARCH_COLLECTED_ITEMS_CAP,
+} from "../config/limits";
 import { createAppError, type AppError } from "../errors/app-error";
+import type { ToolResult } from "../errors/tool-result";
 import { statusForError } from "../errors/http-status";
-import { createStageRecorder, type NodeExecutionDetail, type PipelineStageEvent } from "./pipeline-stage-event";
+import { createAuditedLlmProvider, type LlmCallRecord } from "../llm/audited-llm-provider";
+import { auditsArtifacts, auditsRawText, type AuditLevel } from "../config/audit";
+import { type LogLevel } from "../config/logging";
+import { withLiveEvents } from "./live-events";
+import {
+  createStageRecorder,
+  type AgentTaskInfo,
+  type NodeExecutionDetail,
+  type PipelineStageEvent,
+} from "./pipeline-stage-event";
 import type { WorkflowStage } from "./state-machine";
 import type { JurisprudenceSearchItem } from "../schemas/search.schema";
 import type { DataVeniaRepository } from "../persistence/repository";
@@ -96,6 +121,18 @@ export interface RunPipelineDeps {
    */
   jurisprudenceProvider: JurisprudenceProvider;
   signal?: AbortSignal;
+  /**
+   * Modo auditoria (§14). Em `"off"` — o default — cada nó emite exatamente as contagens que sempre
+   * emitiu; acima disso, emite também o artefato que produziu e as chamadas de modelo que fez.
+   * Ligar isto muda o que sai no stream, nunca o que o pipeline calcula ou persiste.
+   */
+  auditLevel?: AuditLevel;
+  /**
+   * Log no console do servidor (§14). Canal diferente do `auditLevel`: aquele decide o que sai no
+   * stream para o usuário, este o que sai no terminal de quem roda o servidor. Default `"off"` —
+   * quem quer log (a rota, a partir de `PIPELINE_LOG`) pede.
+   */
+  logLevel?: LogLevel;
 }
 
 /** Exatamente o corpo que a rota sempre devolveu — extraído como tipo, não redesenhado. */
@@ -172,10 +209,117 @@ export async function* runPipeline(
   input: RunPipelineInput,
   deps: RunPipelineDeps,
 ): AsyncGenerator<PipelineEvent, void> {
-  const { repository, llmProvider, jurisprudenceProvider: sourceProvider, signal } = deps;
-  const crossFileLlmProvider = deps.crossFileLlmProvider ?? llmProvider;
+  const logger = deps.logLevel && deps.logLevel !== "off"
+    ? createPipelineLogger({ runId: input.runId, level: deps.logLevel })
+    : NO_PIPELINE_LOG;
+  const startedAtMs = Date.now();
+
+  // O log do servidor é escrito aqui, no ponto por onde todo evento já passava, e não espalhado
+  // etapa a etapa: o pipeline não ganhou uma segunda voz para manter em dia, e o que aparece no
+  // terminal é exatamente o que foi para o stream.
+  for await (const event of pipelineEvents(input, deps, logger)) {
+    switch (event.type) {
+      case "start":
+        logger.runStarted(event.traceId);
+        break;
+      case "stage": {
+        const node = event.event.nodeDetail;
+        const name = node?.nodeName ?? event.event.label;
+        if (event.event.status === "RUNNING") {
+          if (node?.output === undefined) logger.stageStarted(name, node?.input);
+          else logger.stageProgress(name, node.output);
+        } else {
+          logger.stageFinished(
+            name,
+            event.event.status !== "FAILED",
+            event.event.durationMs,
+            node?.output,
+            node?.error?.code,
+          );
+        }
+        break;
+      }
+      case "error":
+        logger.runFailed(event.error.code, event.error.description);
+        break;
+      case "result":
+        logger.runFinished(Date.now() - startedAtMs);
+        break;
+      default:
+        break;
+    }
+    yield event;
+  }
+}
+
+async function* pipelineEvents(
+  input: RunPipelineInput,
+  deps: RunPipelineDeps,
+  logger: PipelineLogger,
+): AsyncGenerator<PipelineEvent, void> {
+  const { repository, jurisprudenceProvider: sourceProvider, signal } = deps;
   const { runId, traceId, file } = input;
   const filtrosDoUsuario = input.filters;
+
+  const auditLevel = deps.auditLevel ?? "off";
+  const audit = auditsArtifacts(auditLevel);
+  const auditRaw = auditsRawText(auditLevel);
+
+  // Buffer das chamadas de modelo desde a última etapa. É drenado por `llmSubTasks`, de modo que
+  // cada nó leva as chamadas que ele mesmo fez — incluindo as tentativas repetidas do
+  // retry-com-contexto (§11.7), que é onde o ciclo de correção fica visível.
+  const pendingLlmCalls: LlmCallRecord[] = [];
+  // O mesmo decorator serve aos dois canais: sob auditoria a chamada vira sub-tarefa no stream, sob
+  // `PIPELINE_LOG=calls` vira uma linha no terminal. Sem nenhum dos dois ele não é composto.
+  const auditLlm = (provider: LlmProvider): LlmProvider =>
+    audit || logger.logsCalls
+      ? createAuditedLlmProvider(provider, (record) => {
+          if (audit) pendingLlmCalls.push(record);
+          logger.llmCall(record);
+        })
+      : provider;
+
+  const llmProvider = auditLlm(deps.llmProvider);
+  // Envolver o mesmo objeto duas vezes registraria cada chamada em duplicata; quando o cross-file
+  // roda no mesmo modelo, ele reusa o provider já auditado.
+  const crossFileLlmProvider =
+    deps.crossFileLlmProvider && deps.crossFileLlmProvider !== deps.llmProvider
+      ? auditLlm(deps.crossFileLlmProvider)
+      : llmProvider;
+
+  /**
+   * Combina a saída resumida (o que o stream sempre carregou) com o artefato completo, só no modo
+   * auditoria. O resumo nunca é substituído: quem lê o painel continua vendo a contagem no mesmo
+   * lugar, e quem audita ganha o conteúdo ao lado.
+   */
+  function auditOutput(
+    summary: Record<string, unknown>,
+    full: () => Record<string, unknown>,
+  ): Record<string, unknown> {
+    return audit ? { ...summary, ...full() } : summary;
+  }
+
+  /** As chamadas de modelo acumuladas viram sub-tarefas do nó que está fechando. */
+  function llmSubTasks(): AgentTaskInfo[] | undefined {
+    if (!audit || pendingLlmCalls.length === 0) return undefined;
+    const drained = pendingLlmCalls.splice(0, pendingLlmCalls.length);
+    return drained.map((call) => ({
+      id: `llm-${call.callIndex}-${call.schemaName}`,
+      name: `${call.schemaName} · tentativa ${call.callIndex} · ${call.respondedBy ?? call.model}`,
+      status: call.outcome === "OK" ? "COMPLETED" : "FAILED",
+      durationMs: call.durationMs,
+      input: {
+        provider: call.provider,
+        model: call.model,
+        respondedBy: call.respondedBy,
+        maxOutputTokens: call.maxOutputTokens,
+        system: call.system,
+        prompt: call.prompt,
+      },
+      output: call.output,
+      error: call.outcome === "ERROR" ? { code: call.errorCode, description: call.errorDescription } : undefined,
+    }));
+  }
 
   const recorder = createStageRecorder();
   const startedAt = new Date().toISOString();
@@ -235,6 +379,9 @@ export async function* runPipeline(
       type: "stage",
       event: recorder.record(stage, label, "FAILED", startedAtMs, {
         ...detail,
+        // As chamadas de modelo pendentes entram aqui mesmo quando a etapa falha — é justamente o
+        // momento em que ver o prompt que produziu a saída recusada tem mais valor.
+        subTasks: detail.subTasks ?? llmSubTasks(),
         error: errorDetail(error),
       }),
     };
@@ -324,11 +471,14 @@ export async function* runPipeline(
     type: "stage",
     event: recorder.record("PARSING", "Extração de Texto", "COMPLETED", tParse, {
       ...parsingDetail,
-      output: {
-        documentId: parsed.data.documentId,
-        metadata: parsed.data.metadata,
-        charCount: parsed.data.text.length,
-      },
+      output: auditOutput(
+        {
+          documentId: parsed.data.documentId,
+          metadata: parsed.data.metadata,
+          charCount: parsed.data.text.length,
+        },
+        () => ({ rawText: auditRaw ? parsed.data.text : undefined }),
+      ),
       logs: [
         `[INFO] Texto extraído (${parsed.data.text.length} caracteres, ${parsed.data.metadata.pageCount} páginas).`,
       ],
@@ -357,10 +507,16 @@ export async function* runPipeline(
     type: "stage",
     event: recorder.record("SANITIZING", "Sanitização PII (HU-05)", "COMPLETED", tSan, {
       ...sanitizingDetail,
-      output: {
-        redactionsCount: sanitized.data.redactions.length,
-        sanitizedLength: sanitized.data.sanitizedText.length,
-      },
+      output: auditOutput(
+        {
+          redactionsCount: sanitized.data.redactions.length,
+          sanitizedLength: sanitized.data.sanitizedText.length,
+        },
+        () => ({
+          redactions: sanitized.data.redactions,
+          sanitizedText: sanitized.data.sanitizedText,
+        }),
+      ),
       logs: [`[INFO] ${sanitized.data.redactions.length} dados pessoais mascarados/sanitizados.`],
     }),
   };
@@ -413,10 +569,14 @@ export async function* runPipeline(
     type: "stage",
     event: recorder.record("DOCUMENT_ANALYSIS", "Análise de Caso (LLM)", "COMPLETED", tCase, {
       ...caseDetail,
-      output: {
-        legalIssuesCount: caseAnalysis.data.legalIssues.length,
-        factsCount: caseAnalysis.data.facts.length,
-      },
+      output: auditOutput(
+        {
+          legalIssuesCount: caseAnalysis.data.legalIssues.length,
+          factsCount: caseAnalysis.data.facts.length,
+        },
+        () => ({ caseAnalysis: caseAnalysis.data }),
+      ),
+      subTasks: llmSubTasks(),
       logs: [
         `[INFO] Análise do caso concluída com ${caseAnalysis.data.legalIssues.length} teses jurídicas mapeadas.`,
       ],
@@ -464,6 +624,7 @@ export async function* runPipeline(
     event: recorder.record("QUERY_GENERATION", "Geração de Queries", "COMPLETED", tQueries, {
       ...queryDetail,
       output: { totalQueries: queryPlan.data.queries.length, queries: queryPlan.data.queries },
+      subTasks: llmSubTasks(),
       logs: [`[INFO] ${queryPlan.data.queries.length} pesquisas jurídicas personalizadas foram criadas.`],
     }),
   };
@@ -512,23 +673,81 @@ export async function* runPipeline(
   const tSearch = Date.now();
   const foundItems: JurisprudenceSearchItem[] = [];
   const jurisprudenceSources = new Set<string>();
+  /** Buscas que a fixture respondeu no lugar da fonte configurada — ver o `[AVISO]` da etapa. */
+  const degradedSources: string[] = [];
+  // Uma sub-tarefa por query: é o que permite abrir no navegador exatamente a mesma URL que o
+  // código consultou e comparar o resultado com o portal, em vez de reconstruí-la à mão.
+  const searchSubTasks: AgentTaskInfo[] = [];
+  /** Queries amplas o bastante para valer um aviso de refinamento — nenhuma delas impede o run. */
+  const broadQueries: string[] = [];
   for (const searchQuery of queriesParaBuscar) {
     if (signal?.aborted) break;
     // O recorte acompanha TODA query: o funil de HU-13 conta o total por busca, e aplicar em
     // só algumas daria um total que não corresponde a recorte nenhum.
-    const query = { query: searchQuery.query, filters: filtrosDoUsuario };
+    const normalizedQuery = normalizeTjprKeywordQuery(searchQuery.query) || searchQuery.query.trim();
+    const query = { query: normalizedQuery, filters: filtrosDoUsuario };
+    const tQuery = Date.now();
     const searchResult = await guardedExecution.run("searchJurisprudence", () =>
       jurisprudenceProvider.search(query),
     );
     if (searchResult.isError) {
+      searchSubTasks.push({
+        id: `busca-${searchSubTasks.length + 1}`,
+        name: normalizedQuery,
+        status: "FAILED",
+        durationMs: Date.now() - tQuery,
+        input: {
+          queryOriginal: searchQuery.query,
+          queryEnviada: normalizedQuery,
+          intent: searchQuery.intent,
+          legalIssueId: searchQuery.legalIssueId,
+        },
+        error: { code: searchResult.error.code, description: searchResult.error.description },
+      });
       yield* failStage("SEARCH", "Busca Jurisprudencial", tSearch, searchResult.error, {
         ...searchDetail,
-        input: { query: searchQuery.query },
+        input: { queryOriginal: searchQuery.query, queryEnviada: normalizedQuery },
+        subTasks: audit ? searchSubTasks : undefined,
       });
       return;
     }
     const searchProvider = searchResult.metadata?.source ?? sourceProvider.name;
     jurisprudenceSources.add(searchProvider);
+    // Só acontece no modo `tjpr+fixture`, que é opt-in: o provider primário falhou e a resposta veio
+    // do fallback. Precisa de aviso, não de uma string discreta no rodapé — a fixture nunca devolve
+    // vazio, então uma degradação despercebida entrega um relatório completo sobre acórdãos que não
+    // existem. Comparar com o nome do provider configurado é o que torna o desvio detectável.
+    if (sourceProvider.name !== "fixture" && searchProvider === "fixture" && !degradedSources.includes(normalizedQuery)) {
+      degradedSources.push(normalizedQuery);
+    }
+
+    searchSubTasks.push({
+      id: `busca-${searchSubTasks.length + 1}`,
+      name: normalizedQuery,
+      status: "COMPLETED",
+      durationMs: Date.now() - tQuery,
+      input: {
+        queryOriginal: searchQuery.query,
+        queryEnviada: normalizedQuery,
+        intent: searchQuery.intent,
+        legalIssueId: searchQuery.legalIssueId,
+        reason: searchQuery.reason,
+        // Vazio na fixture, que não fala HTTP; presente sempre que a fonte for o portal real.
+        url: searchResult.metadata?.url,
+      },
+      output: {
+        provider: searchProvider,
+        // O total que a fonte declarou ter, que não é o que veio: o portal responde por página.
+        totalCount: searchResult.data.totalCount,
+        itemsReturned: searchResult.data.items.length,
+        // Quantas páginas o portal realmente entregou. Ficar em 1 com `SEARCH_MAX_PAGES = 3`
+        // significa que o parâmetro de paginação ainda não está configurado (HU-38).
+        pagesFetched: searchResult.metadata?.pagesFetched,
+        collectedCap: SEARCH_COLLECTED_ITEMS_CAP,
+        broad: searchResult.data.totalCount > BROAD_SEARCH_WARNING_THRESHOLD,
+        items: audit ? searchResult.data.items : undefined,
+      },
+    });
 
     const savedSearch = await repository.saveSearch({
       searchId: randomUUID(),
@@ -545,11 +764,10 @@ export async function* runPipeline(
     }
 
     const funneled = applySearchFunnel(searchResult.data);
-    if (funneled.isError) {
-      yield* failRun(funneled.error);
-      return;
-    }
-    foundItems.push(...funneled.data);
+    foundItems.push(...funneled.items);
+    // Busca ampla demais não derruba mais a execução (decisão de 2026-09-13, `docs/escopo.md`):
+    // vira aviso, para o usuário saber que vale refinar por período, Câmara ou relator.
+    if (funneled.broad) broadQueries.push(normalizedQuery);
   }
 
   const uniqueItems = dedupeSearchItems(foundItems);
@@ -568,8 +786,39 @@ export async function* runPipeline(
     type: "stage",
     event: recorder.record("SEARCH", "Busca Jurisprudencial", "COMPLETED", tSearch, {
       ...searchDetail,
-      output: { totalFound: uniqueItems.length, selectedCount: selected.data.length },
-      logs: [`[INFO] ${uniqueItems.length} acórdãos encontrados; top ${selected.data.length} selecionados.`],
+      output: auditOutput(
+        { totalFound: uniqueItems.length, selectedCount: selected.data.length },
+        () => ({
+          rankedCap: SEARCH_CANDIDATE_LIMIT,
+          scratchpadCap: SCRATCHPAD_LIMIT,
+          collectedCap: SEARCH_COLLECTED_ITEMS_CAP,
+          broadQueries,
+          // O score e sua composição por critério: é o que explica por que um acórdão entrou e
+          // outro ficou de fora, sem reabrir `pre-rank.ts`.
+          ranked: ranked.map((candidate) => ({
+            id: candidate.item.id,
+            processNumber: candidate.item.processNumber,
+            chamber: candidate.item.chamber,
+            judgmentDate: candidate.item.judgmentDate,
+            url: candidate.item.url,
+            score: candidate.score,
+            scoreBreakdown: candidate.scoreBreakdown,
+            selected: selected.data.some((item) => item.item.id === candidate.item.id),
+          })),
+        }),
+      ),
+      subTasks: audit ? searchSubTasks : undefined,
+      logs: [
+        `[INFO] ${uniqueItems.length} acórdãos encontrados; top ${selected.data.length} selecionados.`,
+        ...(broadQueries.length > 0
+          ? [`[AVISO] ${broadQueries.length} busca(s) muito ampla(s); refine por período, Câmara ou relator.`]
+          : []),
+        ...(degradedSources.length > 0
+          ? [
+              `[AVISO] A fonte configurada (${sourceProvider.name}) falhou em ${degradedSources.length} busca(s) e a fixture respondeu no lugar. Decisões de fixture são fictícias: não serão exibidas como fonte.`,
+            ]
+          : []),
+      ],
     }),
   };
 
@@ -597,8 +846,104 @@ export async function* runPipeline(
   const tScratch = Date.now();
   const versions = scratchpadVersions(llmProvider);
   const scratchpadCache = createRepositoryScratchpadCache({ repository, runId, versions });
-  const scratchpadBatch = await guardedExecution.run("generateScratchpads", () =>
-    generateScratchpads(selected.data, llmProvider, jurisprudenceProvider, undefined, scratchpadCache, signal),
+  /**
+   * Contagem da onda em curso. É o que transforma os minutos mudos da etapa MAP — uma chamada de
+   * modelo por decisão, em ondas de `SCRATCHPAD_CONCURRENCY` — em uma atualização por decisão
+   * concluída, no mesmo nó e com o mesmo id, que o painel substitui no lugar.
+   */
+  const tally = {
+    total: selected.data.length,
+    processed: 0,
+    failed: 0,
+    fromCache: 0,
+    queued: 0,
+    fetching: 0,
+    generating: 0,
+    last: undefined as string | undefined,
+    lastErrorCode: undefined as string | undefined,
+    lastPhase: undefined as string | undefined,
+    lastFetchMs: undefined as number | undefined,
+    lastModelMs: undefined as number | undefined,
+  };
+
+  const scratchpadProgressEvent = (): PipelineEvent => ({
+    type: "stage",
+    event: recorder.progress("SCRATCHPAD_GENERATION", "Geração de Scratchpads", tScratch, {
+      ...scratchpadDetail,
+      output: {
+        total: tally.total,
+        processed: tally.processed,
+        failed: tally.failed,
+        fromCache: tally.fromCache,
+        queued: tally.queued,
+        fetching: tally.fetching,
+        generating: tally.generating,
+        inFlight: tally.fetching + tally.generating,
+        elapsedMs: Date.now() - tScratch,
+        last: tally.last,
+        lastErrorCode: tally.lastErrorCode,
+        lastPhase: tally.lastPhase,
+        lastFetchMs: tally.lastFetchMs,
+        lastModelMs: tally.lastModelMs,
+      },
+      logs: [
+        `[INFO] ${tally.processed + tally.failed}/${tally.total} decisões analisadas` +
+          (tally.failed > 0 ? ` · ${tally.failed} falha(s)` : ""),
+      ],
+    }),
+  });
+
+  const scratchpadBatch = yield* withLiveEvents<PipelineEvent, ToolResult<ScratchpadBatchResult>>((emit) =>
+    guardedExecution.run(
+      "generateScratchpads",
+      () =>
+        generateScratchpads(selected.data, llmProvider, jurisprudenceProvider, {
+          cache: scratchpadCache,
+          signal,
+          onEvent: (event) => {
+            const label = event.processNumber ?? event.candidateId;
+            if (event.type === "STARTED") {
+              tally.queued += 1;
+              return;
+            }
+            if (event.type === "FETCHING") {
+              tally.queued = Math.max(0, tally.queued - 1);
+              tally.fetching += 1;
+              emit(scratchpadProgressEvent());
+              return;
+            }
+            if (event.type === "GENERATING") {
+              tally.fetching = Math.max(0, tally.fetching - 1);
+              tally.generating += 1;
+              emit(scratchpadProgressEvent());
+              return;
+            }
+
+            if (event.type === "FINISHED") {
+              if (event.source === "cache") tally.queued = Math.max(0, tally.queued - 1);
+              else tally.generating = Math.max(0, tally.generating - 1);
+              tally.processed += 1;
+              if (event.source === "cache") tally.fromCache += 1;
+              tally.lastFetchMs = event.timing?.fetchMs;
+              tally.lastModelMs = event.timing?.modelMs;
+              tally.lastPhase = event.source;
+              tally.last = `${label} ${event.status} ${(event.durationMs / 1000).toFixed(1)}s${
+                event.source === "cache" ? " (cache)" : ""
+              }`;
+            } else {
+              if (event.phase === "fetch") tally.fetching = Math.max(0, tally.fetching - 1);
+              else if (event.phase === "model") tally.generating = Math.max(0, tally.generating - 1);
+              else tally.queued = Math.max(0, tally.queued - 1);
+              tally.failed += 1;
+              tally.lastErrorCode = event.error.code;
+              tally.lastPhase = event.phase;
+              tally.last = `${label} ✖ ${(event.durationMs / 1000).toFixed(1)}s`;
+            }
+
+            emit(scratchpadProgressEvent());
+          },
+      }),
+    ),
   );
   if (scratchpadBatch.isError) {
     yield* failStage(
@@ -625,11 +970,45 @@ export async function* runPipeline(
     return;
   }
 
+  // Uma sub-tarefa por decisão: é onde o pool de `SCRATCHPAD_CONCURRENCY` workers (uma chamada de
+  // modelo por decisão, nunca em lote — HU-17) fica visível como trabalho paralelo de fato.
+  const scratchpadSubTasks: AgentTaskInfo[] | undefined = audit
+    ? [
+        ...scratchpadBatch.data.scratchpads.map((scratchpad) => ({
+          id: scratchpad.scratchpadId,
+          name: `${scratchpad.source.processNumber ?? scratchpad.source.sourceId} · ${scratchpad.status}`,
+          status: (scratchpad.status === "VALID" ? "COMPLETED" : "FAILED") as AgentTaskInfo["status"],
+          input: { decisionId: scratchpad.source.sourceId, url: scratchpad.source.url },
+          output: scratchpad,
+        })),
+        ...scratchpadBatch.data.failures.map((failure) => ({
+          id: `falha-${failure.candidateId}`,
+          name: `${failure.candidateId} · ${failure.error.code}`,
+          status: "FAILED" as AgentTaskInfo["status"],
+          input: { decisionId: failure.candidateId },
+          error: { code: failure.error.code, description: failure.error.description, metadata: failure.error.metadata },
+        })),
+        // As chamadas de modelo da etapa MAP — uma por decisão (HU-17) — entram aqui junto com o
+        // resultado de cada uma. Sem drená-las neste nó elas vazariam para o cross-file, que
+        // apareceria carregando prompts que não são dele.
+        ...(llmSubTasks() ?? []),
+      ]
+    : undefined;
+
   yield {
     type: "stage",
     event: recorder.record("SCRATCHPAD_GENERATION", "Geração de Scratchpads", "COMPLETED", tScratch, {
       ...scratchpadDetail,
-      output: { validCount: validScratchpads.length, status: scratchpadBatch.data.status },
+      subTasks: scratchpadSubTasks,
+      output: auditOutput(
+        { validCount: validScratchpads.length, status: scratchpadBatch.data.status },
+        () => ({
+          requested: scratchpadBatch.data.requested,
+          processed: scratchpadBatch.data.processed,
+          failed: scratchpadBatch.data.failed,
+          failures: scratchpadBatch.data.failures,
+        }),
+      ),
       logs: [`[INFO] ${validScratchpads.length} scratchpads gerados e validados por proposição.`],
     }),
   };
@@ -667,8 +1046,20 @@ export async function* runPipeline(
     type: "stage",
     event: recorder.record("CROSS_FILE_ANALYSIS", "Análise Cruzada", "COMPLETED", tCross, {
       ...crossFileDetail,
-      output: { analysesCount: crossFile.data.analyses.length },
-      logs: [`[INFO] Análise cruzada das teses e precedentes finalizada com sucesso.`],
+      output: auditOutput(
+        { analysesCount: crossFile.data.analyses.length },
+        () => ({
+          analyses: crossFile.data.analyses,
+          // Derivado em código, nunca perguntado ao modelo (HU-22) — vale registrar qual foi.
+          opposingPrecedentsFound: crossFile.data.opposingPrecedentsFound,
+          warnings: crossFile.data.warnings,
+        }),
+      ),
+      subTasks: llmSubTasks(),
+      logs: [
+        `[INFO] Análise cruzada das teses e precedentes finalizada com sucesso.`,
+        ...(crossFile.data.warnings ?? []).map((warning) => `[AVISO] ${warning}`),
+      ],
     }),
   };
 
@@ -714,11 +1105,56 @@ export async function* runPipeline(
     return;
   }
 
+  // Uma sub-tarefa por decisão reaberta, com o veredito de cada citação. Sem `matchKind` e
+  // `similarity` ao lado do trecho, "8 evidências verificadas" não é conferível: é justamente aqui
+  // que se vê uma citação que o modelo aproximou demais, ou uma fonte que mudou desde a coleta.
+  const evidenceSubTasks: AgentTaskInfo[] | undefined = audit
+    ? [
+        ...Object.entries(
+          evidence.data.evidences.reduce<Record<string, typeof evidence.data.evidences>>((acc, item) => {
+            (acc[item.scratchpadId] ??= []).push(item);
+            return acc;
+          }, {}),
+        ).map(([scratchpadId, items]) => ({
+          id: scratchpadId,
+          name: `${items[0]?.source.processNumber ?? scratchpadId} · ${items.filter((i) => i.verified).length}/${items.length} conferidas`,
+          status: (items.some((i) => i.verified) ? "COMPLETED" : "FAILED") as AgentTaskInfo["status"],
+          input: {
+            url: items[0]?.source.url,
+            sourceHashNoScratchpad: items[0]?.source.sourceHash,
+            fonteAlterada: evidence.data.staleScratchpadIds.includes(scratchpadId),
+          },
+          output: items.map((item) => ({
+            evidenceId: item.evidenceId,
+            verified: item.verified,
+            matchKind: item.matchKind,
+            similarity: item.similarity,
+            quote: item.quote,
+          })),
+        })),
+        ...evidence.data.failures.map((failure) => ({
+          id: `falha-${failure.scratchpadId}`,
+          name: `${failure.scratchpadId} · ${failure.error.code}`,
+          status: "FAILED" as AgentTaskInfo["status"],
+          error: { code: failure.error.code, description: failure.error.description },
+        })),
+      ]
+    : undefined;
+
   yield {
     type: "stage",
     event: recorder.record("EVIDENCE_VERIFICATION", "Verificação de Evidências", "COMPLETED", tEv, {
       ...evidenceDetail,
-      output: { verifiedCount: evidence.data.verifiedCount },
+      subTasks: evidenceSubTasks,
+      output: auditOutput(
+        { verifiedCount: evidence.data.verifiedCount },
+        () => ({
+          rejectedCount: evidence.data.rejectedCount,
+          staleScratchpadIds: evidence.data.staleScratchpadIds,
+          failures: evidence.data.failures,
+          evidences: evidence.data.evidences,
+        }),
+      ),
       logs: [`[INFO] ${evidence.data.verifiedCount} citações checadas e auditadas anti-alucinação.`],
     }),
   };
@@ -753,14 +1189,16 @@ export async function* runPipeline(
   yield { type: "stage", event: recorder.start("REPORT_GENERATION", "Geração de Relatório", reportDetail) };
   const tRep = Date.now();
   const evidencePolicy = enforceEvidencePolicy(crossFile.data.analyses, evidence.data.evidences);
-  const report = await guardedExecution.run("buildReport", async () =>
-    buildReport({
-      caseAnalysis: caseAnalysis.data,
-      analyses: evidencePolicy.analyses,
-      evidences: evidence.data.evidences,
-      scratchpads: scratchpadBatch.data.scratchpads,
-      policyDropped: evidencePolicy.dropped,
-    }),
+  const report = await guardedExecution.run(
+    "buildReport",
+    async () =>
+      buildReport({
+        caseAnalysis: caseAnalysis.data,
+        analyses: evidencePolicy.analyses,
+        evidences: evidence.data.evidences,
+        scratchpads: scratchpadBatch.data.scratchpads,
+        policyDropped: evidencePolicy.dropped,
+      }),
   );
   if (report.isError) {
     yield* failStage("REPORT_GENERATION", "Geração de Relatório", tRep, report.error, reportDetail);
@@ -771,7 +1209,16 @@ export async function* runPipeline(
     type: "stage",
     event: recorder.record("REPORT_GENERATION", "Geração de Relatório", "COMPLETED", tRep, {
       ...reportDetail,
-      output: { reportId: report.data.reportId, status: "READY" },
+      output: auditOutput(
+        { reportId: report.data.reportId, status: "READY" },
+        () => ({
+          report: report.data,
+          // O que a regra anti-alucinação de HU-25 removeu antes da tela, e por quê. Sem isto,
+          // "por que isso não aparece no relatório" só se responde relendo o código.
+          policyDropped: evidencePolicy.dropped,
+          verifiedEvidenceIds: evidencePolicy.verifiedEvidenceIds,
+        }),
+      ),
       logs: [`[INFO] Relatório final consolidado e pronto para visualização.`],
     }),
   };

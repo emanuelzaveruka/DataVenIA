@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { analyzeCrossFile, hasOpposingPrecedents } from "../analyze-cross-file";
 import { parseStructuredOutput } from "../../../llm/validate-structured-output";
 import type { GenerateStructuredParams, LlmProvider } from "../../../llm/provider";
@@ -103,6 +103,11 @@ function analysisResponse(overrides: Partial<CrossFileAnalysis> = {}): { analyse
 }
 
 describe("analyzeCrossFile", () => {
+  afterEach(() => {
+    delete process.env.CROSS_FILE_OPPOSITION_GUARD;
+    vi.unstubAllEnvs();
+  });
+
   it("produces one analysis per legal issue and reports that contrary precedents exist (HU-21/HU-22)", async () => {
     const provider = fakeProviderFromRawResponses([analysisResponse()]);
 
@@ -171,6 +176,60 @@ describe("analyzeCrossFile", () => {
       expect(result.error.metadata?.scratchpadCount).toBe(2);
     }
     expect(provider.generateStructured).toHaveBeenCalledTimes(3);
+  });
+
+  it("em warn segue quando só a guarda global HU-22 falha e devolve aviso", async () => {
+    process.env.CROSS_FILE_OPPOSITION_GUARD = "warn";
+    const provider = fakeProviderFromRawResponses([
+      analysisResponse({
+        opposingDecisions: [],
+        mixedDecisions: [],
+        strongestOpposing: [],
+        risks: [{ description: "Amostra reduzida pode não representar contrários.", evidenceIds: ["EV-1"] }],
+      }),
+    ]);
+
+    const result = await analyzeCrossFile(caseAnalysis(), [scratchpad(), opposingScratchpad()], provider);
+
+    expect(result.isError).toBe(false);
+    if (!result.isError) {
+      expect(result.data.opposingPrecedentsFound).toBe(false);
+      expect(result.data.warnings?.[0]).toContain("O relatório seguirá com aviso");
+    }
+  });
+
+  it("usa warn por padrão para não quebrar quando a amostra só trouxer casos positivos", async () => {
+    delete process.env.CROSS_FILE_OPPOSITION_GUARD;
+    const provider = fakeProviderFromRawResponses([
+      analysisResponse({ opposingDecisions: [], mixedDecisions: [], strongestOpposing: [] }),
+    ]);
+
+    const result = await analyzeCrossFile(caseAnalysis(), [scratchpad(), opposingScratchpad()], provider);
+
+    expect(result.isError).toBe(false);
+    if (!result.isError) expect(result.data.warnings).toHaveLength(1);
+  });
+
+  it("em strict continua falhando quando contrários somem", async () => {
+    process.env.CROSS_FILE_OPPOSITION_GUARD = "strict";
+    const provider = fakeProviderFromRawResponses([
+      analysisResponse({ opposingDecisions: [], mixedDecisions: [], strongestOpposing: [] }),
+    ]);
+
+    const result = await analyzeCrossFile(caseAnalysis(), [scratchpad(), opposingScratchpad()], provider);
+
+    expect(result.isError).toBe(true);
+    if (result.isError) expect(result.error.description).toContain("Precedentes contrários");
+  });
+
+  it("em warn ainda falha para id inventado", async () => {
+    process.env.CROSS_FILE_OPPOSITION_GUARD = "warn";
+    const provider = fakeProviderFromRawResponses([analysisResponse({ supportingDecisions: ["SP-INVENTADO"] })]);
+
+    const result = await analyzeCrossFile(caseAnalysis(), [scratchpad(), opposingScratchpad()], provider);
+
+    expect(result.isError).toBe(true);
+    if (result.isError) expect(result.error.description).toContain("SP-INVENTADO");
   });
 
   it("feeds the previous validation error back into the retry prompt (HU-20/§11.7)", async () => {

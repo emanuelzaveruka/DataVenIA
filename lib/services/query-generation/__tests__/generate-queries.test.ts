@@ -48,6 +48,24 @@ describe("generateSearchQueries", () => {
     }
   });
 
+  it("orienta o modelo a gerar keywords curtas para o TJPR", async () => {
+    const provider = fakeProviderFromRawResponses([
+      {
+        queries: [
+          { query: "plano saude negativa cobertura", reason: "Busca pela tese principal.", intent: "MAIN_THESIS", legalIssueId: "issue-1" },
+          { query: "exclusao contratual valida", reason: "Busca por decisões contrárias.", intent: "CONTRARY", legalIssueId: "issue-1" },
+        ],
+      },
+    ]);
+
+    await generateSearchQueries(caseAnalysis, provider);
+
+    const params = vi.mocked(provider.generateStructured).mock.calls[0]![0];
+    expect(params.system).toContain("formato keyword");
+    expect(params.system).toContain("plano saude");
+    expect(params.prompt).toContain("keywords curtas");
+  });
+
   it("rejects an empty query set", async () => {
     const provider = fakeProviderFromRawResponses([{ queries: [] }, { queries: [] }, { queries: [] }]);
 

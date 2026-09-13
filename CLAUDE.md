@@ -139,11 +139,12 @@ jurisprudência roda em modo fixture.
   da tela — mas um percentual sozinho ("reajuste de 30%") continua passando, senão o filtro comeria
   conteúdo jurídico legítimo. HU-29 é classificação de primeira classe (`INDETERMINADA`) com motivo
   explícito, e nenhum caminho força um lado: amostra pequena ou nada verificado → `INDETERMINADA`;
-  empate → `JURISPRUDENCIA_DIVIDIDA`. HU-27 vira `ReportSource` com todos os campos obrigatórios +
-  `isOfficialTjprUrl` (novo `lib/config/official-sources.ts`, §7.1 host allowlist): item sem Câmara/
-  relator/data ou com URL fora do portal oficial é bloqueado **individualmente** e registrado em
-  `report.omissions` — o relatório inteiro nunca cai junto, e §14 continua respondível ("por que
-  isso não aparece"). HU-22 ganhou duas mensagens distintas em vez de uma: "nenhum precedente
+  empate → `JURISPRUDENCIA_DIVIDIDA`. HU-27 vira `ReportSource` com campos sempre renderizáveis +
+  `isOfficialTjprUrl` (novo `lib/config/official-sources.ts`, §7.1 host allowlist): URL fora do
+  portal oficial é bloqueada **individualmente** e registrada em `report.omissions`; Câmara/relator/
+  data ausentes aparecem como "Não informado" em vez de sumirem com uma decisão verificada. O
+  relatório inteiro nunca cai junto, e §14 continua respondível ("por que isso não aparece"). HU-22
+  ganhou duas mensagens distintas em vez de uma: "nenhum precedente
   contrário identificado na amostra" só é dito quando a amostra realmente não tinha contrários; se
   tinha mas nenhum trecho verificou, o texto diz isso. UI: `app/research-disclaimer.tsx` (HU-28 —
   sem botão de fechar e sem estado de propósito, a validação da HU exige que não seja dispensável)

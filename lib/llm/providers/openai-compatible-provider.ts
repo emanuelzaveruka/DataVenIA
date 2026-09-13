@@ -3,6 +3,7 @@ import { createAppError } from "../../errors/app-error";
 import { isRetryable } from "../../errors/error-classifier";
 import { toolFailure, type ToolResult } from "../../errors/tool-result";
 import type { GenerateStructuredParams, LlmProvider } from "../provider";
+import { abortAwareError, callSignal } from "./call-signal";
 import { toStrictJsonSchema } from "../to-strict-json-schema";
 import { parseStructuredOutput } from "../validate-structured-output";
 
@@ -100,14 +101,20 @@ ${JSON.stringify(jsonSchema)}`;
       try {
         response = await fetch(apiUrl, {
           method: "POST",
-          signal: params.signal,
+          signal: callSignal(params.signal),
           headers: {
             "content-type": "application/json",
             authorization: `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
             model,
-            [maxTokensParameter]: params.maxOutputTokens ?? 4096,
+            // Teto de saída só quando o chamador pede um. Omitido, vale o limite do próprio modelo:
+            // a geração termina quando o modelo termina, e não quando bate numa constante de
+            // provider. O `?? 4096` que ficava aqui parecia inofensivo e era o que interrompia a
+            // etapa MAP no meio — em modelo de raciocínio os tokens de raciocínio saem desse mesmo
+            // orçamento, então a resposta vinha truncada (`finish_reason=length`), virava
+            // STRUCTURED_OUTPUT e gastava as três tentativas do retry sem chance de acerto.
+            ...(params.maxOutputTokens ? { [maxTokensParameter]: params.maxOutputTokens } : {}),
             ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
             response_format: responseFormat,
             messages: [
@@ -117,17 +124,7 @@ ${JSON.stringify(jsonSchema)}`;
           }),
         });
       } catch (err) {
-        return toolFailure(
-          createAppError({
-            code: "LLM_NETWORK_ERROR",
-            category: "NETWORK",
-            severity: "ERROR",
-            description: `Failed to reach ${name} API: ${(err as Error).message}`,
-            isRetryable: true,
-            source: name,
-            operation: "generateStructured",
-          }),
-        );
+        return toolFailure(abortAwareError(name, params.signal, err));
       }
 
       if (!response.ok) {
@@ -168,6 +165,9 @@ ${JSON.stringify(jsonSchema)}`;
             operation: "generateStructured",
             metadata: {
               finishReason,
+              // Bateu no limite de saída: com o teto do provider removido, isto significa o limite
+              // do próprio modelo — informação de verdade, e não uma constante nossa no caminho.
+              truncated: finishReason === "length",
               refusal: refusal ? refusal.slice(0, 500) : undefined,
               usage: body.usage,
             },

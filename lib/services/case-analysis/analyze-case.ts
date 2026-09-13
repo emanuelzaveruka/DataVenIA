@@ -1,4 +1,8 @@
-import { CaseAnalysisSchema, type CaseAnalysis } from "../../schemas/case-analysis.schema";
+import {
+  assignLegalIssueIds,
+  CaseAnalysisContentSchema,
+  type CaseAnalysis,
+} from "../../schemas/case-analysis.schema";
 import type { SanitizedDocument } from "../../schemas/sanitization.schema";
 import type { LlmProvider } from "../../llm/provider";
 import { generateStructuredWithRetry } from "../../llm/generate-with-retry";
@@ -41,7 +45,7 @@ export async function analyzeCase(
   const result = await generateStructuredWithRetry(provider, {
     system: CASE_ANALYSIS_SYSTEM_PROMPT,
     prompt: buildCaseAnalysisPrompt(document),
-    schema: CaseAnalysisSchema,
+    schema: CaseAnalysisContentSchema,
     schemaName: "CaseAnalysis",
     schemaDescription: "Análise estruturada do caso extraída do documento jurídico.",
     signal,
@@ -66,5 +70,7 @@ export async function analyzeCase(
     );
   }
 
-  return toolSuccess(result.data);
+  // O `id` de cada questão jurídica é atribuído aqui, não pedido ao modelo: é a chave que liga
+  // query, análise cruzada e relatório, e precisa ser estável e previsível.
+  return toolSuccess(assignLegalIssueIds(result.data));
 }

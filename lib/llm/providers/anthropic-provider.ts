@@ -3,11 +3,20 @@ import { createAppError } from "../../errors/app-error";
 import { isRetryable } from "../../errors/error-classifier";
 import { toolFailure, type ToolResult } from "../../errors/tool-result";
 import type { GenerateStructuredParams, LlmProvider } from "../provider";
+import { abortAwareError, callSignal } from "./call-signal";
 import { parseStructuredOutput } from "../validate-structured-output";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 const DEFAULT_MODEL = "claude-sonnet-4-5-20250929";
+/**
+ * Diferente da Chat Completions, a Messages API **exige** `max_tokens` — aqui não existe a opção de
+ * omitir e deixar o modelo ir até o próprio limite. 8192 é o teto válido em qualquer modelo Claude
+ * atual, inclusive os menores, e por isso é o default seguro; quem precisar de mais passa
+ * `maxOutputTokens` explicitamente, como faz a análise cruzada (§3.8). É exigência da API, não uma
+ * escolha do pipeline.
+ */
+const REQUIRED_MAX_TOKENS_FALLBACK = 8192;
 
 export interface AnthropicProviderConfig {
   apiKey: string;
@@ -50,7 +59,7 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): LlmPro
       try {
         response = await fetch(ANTHROPIC_API_URL, {
           method: "POST",
-          signal: params.signal,
+          signal: callSignal(params.signal),
           headers: {
             "content-type": "application/json",
             "x-api-key": config.apiKey,
@@ -58,7 +67,7 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): LlmPro
           },
           body: JSON.stringify({
             model,
-            max_tokens: params.maxOutputTokens ?? 4096,
+            max_tokens: params.maxOutputTokens ?? REQUIRED_MAX_TOKENS_FALLBACK,
             system: params.system,
             messages: [{ role: "user", content: params.prompt }],
             tools: [
@@ -72,17 +81,7 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): LlmPro
           }),
         });
       } catch (err) {
-        return toolFailure(
-          createAppError({
-            code: "LLM_NETWORK_ERROR",
-            category: "NETWORK",
-            severity: "ERROR",
-            description: `Failed to reach Anthropic API: ${(err as Error).message}`,
-            isRetryable: true,
-            source: "anthropic",
-            operation: "generateStructured",
-          }),
-        );
+        return toolFailure(abortAwareError("anthropic", params.signal, err));
       }
 
       if (!response.ok) {

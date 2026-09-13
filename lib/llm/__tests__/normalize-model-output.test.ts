@@ -50,6 +50,17 @@ describe("normalizeModelOutput — degradação sintática", () => {
     expect(schema.safeParse(value).success).toBe(true);
   });
 
+  it("normalizes through z.preprocess wrappers before final schema validation", () => {
+    const preprocessed = z.preprocess((raw) => raw, schema);
+    const { value, repairs } = normalizeModelOutput(preprocessed, {
+      analyses: [{ id: "A", tags: [], chamberPattern: null, risks: [] }],
+    });
+
+    expect("chamberPattern" in (value as any).analyses[0]).toBe(false);
+    expect(repairs[0]!.path).toBe("analyses.0.chamberPattern");
+    expect(preprocessed.safeParse(value).success).toBe(true);
+  });
+
   it("reports nothing and changes nothing when the output is already well formed", () => {
     const raw = { analyses: [{ id: "A", tags: ["x"], risks: [{ description: "R", evidenceIds: ["EV-1"] }] }] };
     const { value, repairs } = normalize(raw);

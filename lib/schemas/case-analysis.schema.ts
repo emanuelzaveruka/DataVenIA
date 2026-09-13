@@ -40,3 +40,30 @@ export const CaseAnalysisSchema = z.object({
   evidenceSummary: z.array(z.string()),
 });
 export type CaseAnalysis = z.infer<typeof CaseAnalysisSchema>;
+
+/**
+ * O que o modelo produz: tudo menos o `id` das questões jurídicas.
+ *
+ * O `id` é a chave de rastreabilidade do pipeline inteiro — `SearchQuery.legalIssueId` (HU-11),
+ * `CrossFileAnalysis.legalIssueId` (HU-21) e as omissões do relatório (§14) referenciam por ele.
+ * Pedi-lo ao modelo produzia um identificador diferente a cada execução ("1", "issue-1",
+ * "LI-01"...), e o modelo da etapa seguinte, sem um padrão a que se agarrar, inventava o seu.
+ * Atribuir em código é a mesma regra que `ScratchpadSourceSchema` já aplica à identificação da
+ * fonte: identificador é responsabilidade do pipeline, nunca do modelo.
+ */
+export const CaseAnalysisContentSchema = CaseAnalysisSchema.extend({
+  legalIssues: z.array(LegalIssueSchema.omit({ id: true })),
+});
+export type CaseAnalysisContent = z.infer<typeof CaseAnalysisContentSchema>;
+
+/** Formato estável e legível do identificador de questão jurídica: `LI-1`, `LI-2`, ... */
+export function legalIssueId(index: number): string {
+  return `LI-${index + 1}`;
+}
+
+export function assignLegalIssueIds(content: CaseAnalysisContent): CaseAnalysis {
+  return {
+    ...content,
+    legalIssues: content.legalIssues.map((issue, index) => ({ ...issue, id: legalIssueId(index) })),
+  };
+}

@@ -74,6 +74,38 @@ describe("buildCrossFileAnalysisResponseSchema", () => {
     expect(messages(result)).toContain("SP-99");
   });
 
+  it("normaliza linhas copiadas do prompt quando contêm exatamente um scratchpadId conhecido", () => {
+    const result = parse([
+      analysis({
+        supportingDecisions: ["- scratchpadId: SP-1"],
+        opposingDecisions: ["scratchpadId: SP-2"],
+        strongestSupporting: ["  - scratchpadId: SP-1  "],
+        strongestOpposing: ["SP-2"],
+      }),
+      analysis({ legalIssueId: "LI-2" }),
+    ]);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.analyses[0]!.supportingDecisions).toEqual(["SP-1"]);
+    expect(result.data.analyses[0]!.opposingDecisions).toEqual(["SP-2"]);
+    expect(result.data.analyses[0]!.strongestSupporting).toEqual(["SP-1"]);
+  });
+
+  it("continua rejeitando fragmentos ou IDs ambíguos que não podem ser normalizados com segurança", () => {
+    const result = parse([
+      analysis({
+        opposingDecisions: ["ef?"],
+        strongestOpposing: ["SP-1 e SP-2"],
+      }),
+      analysis({ legalIssueId: "LI-2" }),
+    ]);
+
+    expect(result.success).toBe(false);
+    expect(messages(result)).toContain("ef?");
+    expect(messages(result)).toContain("SP-1 e SP-2");
+  });
+
   it("rejects an evidenceId that no scratchpad produced (HU-23/HU-25)", () => {
     const result = parse([
       analysis({ risks: [{ description: "Risco inventado.", evidenceIds: ["EV-404"] }] }),
@@ -99,10 +131,17 @@ describe("buildCrossFileAnalysisResponseSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("rejects a legal issue left without analysis (HU-21)", () => {
+  it("completa legalIssue omitida como NOT_COVERED em vez de derrubar o run", () => {
     const result = parse([analysis()]);
-    expect(result.success).toBe(false);
-    expect(messages(result)).toContain("LI-2");
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.analyses).toHaveLength(2);
+    expect(result.data.analyses[1]).toMatchObject({
+      legalIssueId: "LI-2",
+      sampleCoverage: "NOT_COVERED",
+      supportingDecisions: [],
+      risks: [],
+    });
   });
 
   it("rejects a legal issue analyzed twice", () => {
@@ -133,13 +172,14 @@ describe("buildCrossFileAnalysisResponseSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it('rejects "NOT_COVERED" that still lists a decision — a contradiction, not a lacuna', () => {
+  it('corrige "NOT_COVERED" com decisão listada para "COVERED"', () => {
     const result = parse([analysis(), uncovered({ supportingDecisions: ["SP-1"] })]);
-    expect(result.success).toBe(false);
-    expect(messages(result)).toContain("SP-1");
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.analyses[1]!.sampleCoverage).toBe("COVERED");
   });
 
-  it('rejects "NOT_COVERED" that still asserts risks, arguments, factors or a chamber pattern', () => {
+  it('continua rejeitando conteúdo sem nenhuma decisão real que o sustente', () => {
     const result = parse([
       analysis(),
       uncovered({
@@ -149,9 +189,29 @@ describe("buildCrossFileAnalysisResponseSchema", () => {
       }),
     ]);
     expect(result.success).toBe(false);
-    expect(messages(result)).toContain("risks");
-    expect(messages(result)).toContain("recurringFactors");
-    expect(messages(result)).toContain("chamberPattern");
+    expect(messages(result)).toContain("pelo menos uma decisão real");
+  });
+
+  it('corrige "NOT_COVERED" contraditório para "COVERED" quando o modelo lista decisões e fundamentos', () => {
+    const schema = buildCrossFileAnalysisResponseSchema(context);
+    const result = schema.safeParse({
+      analyses: [
+        analysis(),
+        uncovered({
+          supportingDecisions: ["SP-1", "SP-3"],
+          strongestSupporting: ["SP-1"],
+          recurringFactors: ["Prescrição médica expressa"],
+          chamberPattern: "Padrão favorável à cobertura.",
+          risks: [{ description: "Risco de afastamento do dano moral.", evidenceIds: ["EV-2"] }],
+          suggestedArguments: [{ argument: "Distinguir exclusão genérica.", evidenceIds: ["EV-1"] }],
+        }),
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.analyses[1]!.sampleCoverage).toBe("COVERED");
+    expect(result.data.analyses[1]!.supportingDecisions).toEqual(["SP-1", "SP-3"]);
   });
 
   it("does not demand contrary precedents from a reduce where nothing was covered (HU-22)", () => {
@@ -162,13 +222,12 @@ describe("buildCrossFileAnalysisResponseSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("still demands contrary precedents as soon as one issue is covered (HU-22)", () => {
+  it("não bloqueia por padrão quando a amostra tem OPPOSES/MIXED mas o reduce só achou favoráveis", () => {
     const result = parse([
       analysis({ opposingDecisions: [], strongestOpposing: [] }),
       uncovered({ legalIssueId: "LI-2" }),
     ]);
-    expect(result.success).toBe(false);
-    expect(messages(result)).toContain("contrários");
+    expect(result.success).toBe(true);
   });
 
   /**
@@ -191,15 +250,7 @@ describe("buildCrossFileAnalysisResponseSchema", () => {
     };
 
     const schema = buildCrossFileAnalysisResponseSchema(context);
-    const { value, repairs } = normalizeModelOutput(schema, raw);
-
-    expect(repairs.map((repair) => repair.path)).toEqual([
-      "analyses.0.strongestSupporting",
-      "analyses.0.strongestOpposing",
-      "analyses.1.strongestSupporting",
-      "analyses.1.strongestOpposing",
-    ]);
-
+    const { value } = normalizeModelOutput(schema, raw);
     const result = schema.safeParse(value);
     expect(result.success).toBe(false);
     if (result.success) return;
@@ -207,6 +258,22 @@ describe("buildCrossFileAnalysisResponseSchema", () => {
     expect(result.error.issues).toHaveLength(1);
     expect(result.error.issues[0]!.path.join(".")).toBe("analyses.1.risks.0.evidenceIds");
     expect(result.error.issues[0]!.message).toContain("REMOVA a afirmação");
+  });
+
+  it("normaliza chamberPattern=null mesmo com o preprocess contextual de IDs", () => {
+    const schema = buildCrossFileAnalysisResponseSchema(context);
+    const { value, repairs } = normalizeModelOutput(schema, {
+      analyses: [
+        analysis({ chamberPattern: null as unknown as string }),
+        analysis({ legalIssueId: "LI-2", chamberPattern: null as unknown as string }),
+      ],
+    });
+
+    expect(repairs.map((repair) => repair.path)).toEqual([
+      "analyses.0.chamberPattern",
+      "analyses.1.chamberPattern",
+    ]);
+    expect(schema.safeParse(value).success).toBe(true);
   });
 
   it("tells the model to remove an unsupported claim instead of leaving evidenceIds empty (HU-23)", () => {
@@ -236,11 +303,38 @@ describe("buildCrossFileAnalysisResponseSchema", () => {
     expect(messages(result)).toContain("SP-3");
   });
 
-  it("rejects an analysis that drops every contrary precedent when the sample has OPPOSES holdings (HU-22)", () => {
+  it("em strict rejeita análise que some com todo precedente contrário quando a amostra tem OPPOSES (HU-22)", () => {
     const onlyFavorable = analysis({ opposingDecisions: [], strongestOpposing: [] });
-    const result = parse([onlyFavorable, { ...onlyFavorable, legalIssueId: "LI-2" }]);
+    const result = buildCrossFileAnalysisResponseSchema(context, { oppositionGuard: "strict" }).safeParse({
+      analyses: [onlyFavorable, { ...onlyFavorable, legalIssueId: "LI-2" }],
+    });
     expect(result.success).toBe(false);
-    expect(messages(result)).toContain("contrários");
+    expect(result.success ? "" : result.error.issues.map((issue) => issue.message).join(" | ")).toContain(
+      "contrários",
+    );
+  });
+
+  it("em warn aceita a guarda global HU-22 sem relaxar validações estruturais", () => {
+    const onlyFavorable = analysis({ opposingDecisions: [], strongestOpposing: [] });
+    const result = buildCrossFileAnalysisResponseSchema(context, { oppositionGuard: "warn" }).safeParse({
+      analyses: [onlyFavorable, { ...onlyFavorable, legalIssueId: "LI-2" }],
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("em modo warn continua rejeitando erros estruturais e IDs inventados", () => {
+    const result = buildCrossFileAnalysisResponseSchema(context, { oppositionGuard: "warn" }).safeParse({
+      analyses: [
+        analysis({ supportingDecisions: ["SP-INVENTADO"] }),
+        analysis({ legalIssueId: "LI-2" }),
+      ],
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.success ? "" : result.error.issues.map((issue) => issue.message).join(" | ")).toContain(
+      "SP-INVENTADO",
+    );
   });
 
   it("accepts an analysis with no contrary precedent when the sample itself has none", () => {

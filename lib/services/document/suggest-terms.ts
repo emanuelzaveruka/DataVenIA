@@ -16,7 +16,7 @@
  * 1. **Citações legais por regex.** Em peça brasileira elas são muito regulares ("art. 18 do CDC",
  *    "Lei 9.656/1998", "Súmula 608 do STJ") e são exatamente o vocabulário com que jurisprudência é
  *    indexada — alta precisão por quase nenhum custo.
- * 2. **Frases curtas frequentes** sem stopword nas pontas ("plano de saúde", "negativa de cobertura").
+ * 2. **Frases curtas frequentes** sem stopword nas pontas ("plano saude", "negativa cobertura").
  *    Menos preciso, mas é o que captura a matéria quando a peça cita pouca lei.
  */
 
@@ -63,9 +63,8 @@ function extrairCitacoes(texto: string): string[] {
 }
 
 /**
- * Conectores que podem ficar NO MEIO de um termo. São stopwords, mas "plano de saúde" e "negativa
- * de cobertura" só existem por causa deles — recusá-los no miolo destruiria exatamente os termos
- * que mais valem.
+ * Conectores que podem ficar NO MEIO durante a extração. Na saída final eles são removidos por
+ * `normalizeTjprKeywordQuery`, porque o TJPR trabalha melhor com keywords soltas.
  */
 const CONECTORES = new Set(["de", "da", "do", "dos", "das", "em", "no", "na", "ao", "à", "por"]);
 
@@ -123,12 +122,13 @@ export function suggestSearchTerms(
   const sugestoes: string[] = [];
 
   const adicionar = (termo: string) => {
-    const chave = termo.toLowerCase();
+    const normalizado = normalizeTjprKeywordQuery(termo);
+    const chave = normalizado.toLowerCase();
     // Marcador de sanitização ([PARTE_1], [CPF]) nunca é termo de busca: além de inútil no acervo,
     // reintroduziria na consulta o dado que HU-05 acabou de remover.
-    if (chave.includes("[") || vistos.has(chave) || sugestoes.length >= max) return;
+    if (!normalizado || chave.includes("[") || vistos.has(chave) || sugestoes.length >= max) return;
     vistos.add(chave);
-    sugestoes.push(termo);
+    sugestoes.push(normalizado);
   };
 
   // Citação legal primeiro: é a sugestão de maior precisão.
@@ -137,3 +137,4 @@ export function suggestSearchTerms(
 
   return sugestoes;
 }
+import { normalizeTjprKeywordQuery } from "../jurisprudence/normalize-query";

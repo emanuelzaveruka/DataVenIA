@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { analyzeCase } from "../analyze-case";
 import { parseStructuredOutput } from "../../../llm/validate-structured-output";
 import type { GenerateStructuredParams, LlmProvider } from "../../../llm/provider";
@@ -35,6 +36,42 @@ const validCaseAnalysis = {
 };
 
 describe("analyzeCase", () => {
+  it("numera as questões jurídicas em código, ignorando o id que o modelo tenha escrito", async () => {
+    // O id é a chave que liga query (HU-11), análise cruzada (HU-21) e relatório. Pedi-lo ao
+    // modelo dava um formato diferente a cada execução ("1", "issue-1"), e a etapa seguinte, sem
+    // padrão a seguir, inventava o seu — derrubando a análise cruzada inteira por id inexistente.
+    const provider = fakeProviderFromRawResponses([
+      {
+        ...validCaseAnalysis,
+        legalIssues: [
+          { id: "1", topic: "Dano moral", question: "Há dano moral?", relevance: "HIGH" },
+          { id: "qualquer-coisa", topic: "Reajuste", question: "O reajuste é abusivo?", relevance: "MEDIUM" },
+        ],
+      },
+    ]);
+
+    const result = await analyzeCase(
+      sanitizedDocument("x".repeat(MIN_CASE_ANALYSIS_INPUT_CHARS + 1)),
+      provider,
+    );
+
+    expect(result.isError).toBe(false);
+    if (!result.isError) {
+      expect(result.data.legalIssues.map((issue) => issue.id)).toEqual(["LI-1", "LI-2"]);
+      expect(result.data.legalIssues[1]!.topic).toBe("Reajuste");
+    }
+  });
+
+  it("não pede o id ao modelo: ele não aparece no schema enviado", async () => {
+    const provider = fakeProviderFromRawResponses([validCaseAnalysis]);
+
+    await analyzeCase(sanitizedDocument("x".repeat(MIN_CASE_ANALYSIS_INPUT_CHARS + 1)), provider);
+
+    const params = vi.mocked(provider.generateStructured).mock.calls[0]![0] as GenerateStructuredParams<unknown>;
+    const shape = JSON.stringify(z.toJSONSchema(params.schema as z.ZodType, { target: "draft-7" }));
+    expect(shape).not.toContain('"id"');
+  });
+
   it("rejects documents below the minimum useful-content threshold without calling the provider", async () => {
     const provider = fakeProviderFromRawResponses([]);
     const document = sanitizedDocument("texto curto");

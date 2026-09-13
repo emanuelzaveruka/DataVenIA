@@ -201,4 +201,30 @@ describe("generateScratchpad", () => {
       expect(result.data.holdings).toEqual([]);
     }
   });
+
+  it("atribui o id de cada citação em código, como faz com scratchpadId e source", async () => {
+    // Dois Scratchpads do mesmo lote não podem compartilhar um id de citação: é por ele que a
+    // verificação de evidência (HU-24) descobre de qual decisão o trecho veio.
+    const provider = fakeProviderFromRawResponses([validContent]);
+    const outroProvider = fakeProviderFromRawResponses([validContent]);
+    const jurisprudenceProvider = fakeJurisprudenceProvider(toolSuccess(rawDecision()));
+
+    const primeiro = await generateScratchpad(rankedCandidate(), provider, jurisprudenceProvider);
+    const segundo = await generateScratchpad(rankedCandidate(), outroProvider, jurisprudenceProvider);
+
+    expect(primeiro.isError).toBe(false);
+    expect(segundo.isError).toBe(false);
+    if (primeiro.isError || segundo.isError) return;
+
+    const ids = primeiro.data.evidenceCandidates.map((candidate) => candidate.id);
+    // O modelo escreveu "ev-1"; quem manda é o pipeline.
+    expect(ids).not.toContain("ev-1");
+    expect(ids[0]).toMatch(/^EV-[0-9a-f]{6}-1$/);
+    expect(primeiro.data.evidenceCandidates[0]!.quote).toBe(
+      validContent.evidenceCandidates[0]!.quote,
+    );
+
+    const idsDoOutro = segundo.data.evidenceCandidates.map((candidate) => candidate.id);
+    expect(ids.some((id) => idsDoOutro.includes(id))).toBe(false);
+  });
 });

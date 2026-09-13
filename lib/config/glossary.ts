@@ -135,12 +135,12 @@ export const GLOSSARY = {
   citacaoConferida: {
     term: "conferida(s) na fonte original",
     what:
-      "Citações cujo texto foi reaberto na decisão do TJPR e bateu com o original. Nenhum trecho chega ao relatório sem passar por isso, e cada um traz processo, Câmara, relator, data e link para o portal oficial.",
+      "Citações cujo texto foi reaberto na decisão do TJPR e bateu com o original. Nenhum trecho chega ao relatório sem passar por isso, e cada um traz link para o portal oficial e os metadados disponíveis; quando processo, Câmara, relator ou data não vêm da fonte, o campo aparece como não informado.",
   },
   omissoes: {
     term: "omitido(s) por falta de verificação",
     what:
-      "Achados que a análise produziu mas o relatório não exibe: citação que não conferiu na fonte, item sem Câmara/relator/data, link fora do portal oficial do TJPR, ou frase que expressava probabilidade de ganho. Ficam listados um a um, com o motivo — o relatório precisa conseguir responder também por que algo não aparece.",
+      "Achados que a análise produziu mas o relatório não exibe: citação que não conferiu na fonte, link fora do portal oficial do TJPR, ou frase que expressava probabilidade de ganho. Ficam listados um a um, com o motivo — o relatório precisa conseguir responder também por que algo não aparece.",
   },
 } as const satisfies Record<string, GlossaryEntry>;
 

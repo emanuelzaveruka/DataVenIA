@@ -120,17 +120,24 @@ describe("buildReport — rastreabilidade (HU-27)", () => {
     expect(report.omissions.some((omission) => omission.kind === "UNOFFICIAL_SOURCE_URL")).toBe(true);
   });
 
-  it("blocks an item missing chamber, judge or judgment date", () => {
+  it("keeps an official verified item even when TJPR omits chamber, judge or judgment date", () => {
     const incomplete = evidence("EV-1", "SP-1", {
-      source: { ...evidence("EV-1", "SP-1").source, chamber: undefined, judge: undefined },
+      source: {
+        ...evidence("EV-1", "SP-1").source,
+        chamber: undefined,
+        judge: undefined,
+        judgmentDate: undefined,
+      },
     });
 
     const report = expectReport(build({ evidences: [incomplete, evidence("EV-7", "SP-7")] }));
+    const point = report.issues[0]!.favorablePoints[0]!;
 
-    expect(report.issues[0]!.favorablePoints).toHaveLength(0);
-    const omission = report.omissions.find((item) => item.kind === "MISSING_PROVENANCE")!;
-    expect(omission.reason).toContain("chamber");
-    expect(omission.reason).toContain("judge");
+    expect(report.issues[0]!.favorablePoints).toHaveLength(1);
+    expect(point.source.chamber).toBe("Não informado");
+    expect(point.source.judge).toBe("Não informado");
+    expect(point.source.judgmentDate).toBe("Não informado");
+    expect(report.omissions.some((item) => item.kind === "MISSING_PROVENANCE")).toBe(false);
   });
 
   it("records each omission once, even when the same evidence is rejected in several sections", () => {

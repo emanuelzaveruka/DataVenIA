@@ -79,8 +79,136 @@ export interface CrossFileReferenceContext {
   hasOpposingHoldings: boolean;
 }
 
+export const CROSS_FILE_OPPOSITION_GUARDS = ["strict", "warn"] as const;
+export type CrossFileOppositionGuard = (typeof CROSS_FILE_OPPOSITION_GUARDS)[number];
+
 function unknownIds(ids: readonly string[], known: ReadonlySet<string>): string[] {
   return ids.filter((id) => !known.has(id));
+}
+
+function normalizeKnownId(value: unknown, known: ReadonlySet<string>): unknown {
+  if (typeof value !== "string") return value;
+  if (known.has(value)) return value;
+
+  const matches = [...known].filter((id) => value.includes(id));
+  return matches.length === 1 ? matches[0] : value;
+}
+
+function normalizeKnownIdArray(value: unknown, known: ReadonlySet<string>): unknown {
+  if (typeof value === "string") return [normalizeKnownId(value, known)];
+  if (!Array.isArray(value)) return value;
+  return value.map((item) => normalizeKnownId(item, known));
+}
+
+function hasItems(value: unknown): boolean {
+  return Array.isArray(value) && value.length > 0;
+}
+
+function shouldPromoteToCovered(analysis: Record<string, unknown>): boolean {
+  if (analysis.sampleCoverage !== "NOT_COVERED") return false;
+
+  return (
+    hasItems(analysis.supportingDecisions) ||
+    hasItems(analysis.opposingDecisions) ||
+    hasItems(analysis.mixedDecisions) ||
+    hasItems(analysis.strongestSupporting) ||
+    hasItems(analysis.strongestOpposing) ||
+    hasItems(analysis.risks) ||
+    hasItems(analysis.suggestedArguments) ||
+    hasItems(analysis.recurringFactors) ||
+    typeof analysis.chamberPattern === "string"
+  );
+}
+
+function uncoveredAnalysis(legalIssueId: string): CrossFileAnalysis {
+  return {
+    legalIssueId,
+    sampleCoverage: "NOT_COVERED",
+    conclusion: "As decisões analisadas nesta amostra não trouxeram conclusão específica sobre esta questão jurídica.",
+    supportingDecisions: [],
+    opposingDecisions: [],
+    mixedDecisions: [],
+    recurringFactors: [],
+    strongestSupporting: [],
+    strongestOpposing: [],
+    risks: [],
+    suggestedArguments: [],
+  };
+}
+
+/**
+ * Reparos contextuais e sem perda para o incidente recorrente do cross-file: modelos menores às
+ * vezes copiam a linha do prompt inteira (`- scratchpadId: <uuid>`) para um campo que deve conter
+ * só o ID. Como esta fábrica conhece a lista fechada de IDs autorizados, é seguro extrair o ID
+ * quando há exatamente um match. Fragmentos (`ef?`) ou strings com múltiplos IDs continuam
+ * inválidos e voltam ao modelo pelo retry normal.
+ */
+function normalizeCrossFileReferences(raw: unknown, context: CrossFileReferenceContext): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+
+  const knownLegalIssues = new Set(context.legalIssueIds);
+  const knownScratchpads = new Set(context.scratchpadIds);
+  const knownEvidence = new Set(context.evidenceIds);
+  const data = raw as { analyses?: unknown };
+  if (!Array.isArray(data.analyses)) return raw;
+
+  const analyses = data.analyses.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+    const analysis = item as Record<string, unknown>;
+    const normalized = {
+      ...analysis,
+      legalIssueId: normalizeKnownId(analysis.legalIssueId, knownLegalIssues),
+      supportingDecisions: normalizeKnownIdArray(analysis.supportingDecisions, knownScratchpads),
+      opposingDecisions: normalizeKnownIdArray(analysis.opposingDecisions, knownScratchpads),
+      mixedDecisions: normalizeKnownIdArray(analysis.mixedDecisions, knownScratchpads),
+      strongestSupporting: normalizeKnownIdArray(analysis.strongestSupporting, knownScratchpads),
+      strongestOpposing: normalizeKnownIdArray(analysis.strongestOpposing, knownScratchpads),
+      risks: Array.isArray(analysis.risks)
+        ? analysis.risks.map((risk) =>
+            risk && typeof risk === "object" && !Array.isArray(risk)
+              ? {
+                  ...(risk as Record<string, unknown>),
+                  evidenceIds: normalizeKnownIdArray((risk as Record<string, unknown>).evidenceIds, knownEvidence),
+                }
+              : risk,
+          )
+        : analysis.risks,
+      suggestedArguments: Array.isArray(analysis.suggestedArguments)
+        ? analysis.suggestedArguments.map((argument) =>
+            argument && typeof argument === "object" && !Array.isArray(argument)
+              ? {
+                  ...(argument as Record<string, unknown>),
+                  evidenceIds: normalizeKnownIdArray(
+                    (argument as Record<string, unknown>).evidenceIds,
+                    knownEvidence,
+                  ),
+                }
+              : argument,
+          )
+        : analysis.suggestedArguments,
+    };
+
+    return shouldPromoteToCovered(normalized)
+      ? { ...normalized, sampleCoverage: "COVERED" }
+      : normalized;
+  });
+  const seenIssues = new Set(
+    analyses
+      .map((analysis) =>
+        analysis && typeof analysis === "object" && !Array.isArray(analysis)
+          ? (analysis as Record<string, unknown>).legalIssueId
+          : undefined,
+      )
+      .filter((id): id is string => typeof id === "string"),
+  );
+  const missingAnalyses = context.legalIssueIds
+    .filter((legalIssueId) => !seenIssues.has(legalIssueId))
+    .map(uncoveredAnalysis);
+
+  return {
+    ...data,
+    analyses: [...analyses, ...missingAnalyses],
+  };
 }
 
 function addIssue(ctx: z.RefinementCtx, path: (string | number)[], message: string): void {
@@ -251,8 +379,10 @@ function validateOppositionNotDropped(
   ctx: z.RefinementCtx,
   analyses: CrossFileAnalysis[],
   hasOpposingHoldings: boolean,
+  guard: CrossFileOppositionGuard,
 ): void {
   if (!hasOpposingHoldings) return;
+  if (guard === "warn") return;
 
   // Quando nenhuma questão foi coberta pela amostra, não há contraditório a omitir — só não há
   // análise. Exigir aqui um contrário que nenhuma análise pode listar transformaria uma resposta
@@ -282,16 +412,21 @@ export type CrossFileAnalysisResponse = z.infer<typeof CrossFileAnalysisResponse
  */
 export function buildCrossFileAnalysisResponseSchema(
   context: CrossFileReferenceContext,
+  options: { oppositionGuard?: CrossFileOppositionGuard } = {},
 ): z.ZodType<CrossFileAnalysisResponse> {
   const knownScratchpads = new Set(context.scratchpadIds);
   const knownEvidence = new Set(context.evidenceIds);
+  const oppositionGuard = options.oppositionGuard ?? "warn";
 
-  return CrossFileAnalysisResponseShape.superRefine((data, ctx) => {
+  return z.preprocess(
+    (raw) => normalizeCrossFileReferences(raw, context),
+    CrossFileAnalysisResponseShape,
+  ).superRefine((data, ctx) => {
     validateIssueCoverage(ctx, data.analyses, context.legalIssueIds);
     data.analyses.forEach((analysis, index) => {
       validateDecisionRefs(ctx, index, analysis, knownScratchpads);
       validateEvidenceRefs(ctx, index, analysis, knownEvidence);
     });
-    validateOppositionNotDropped(ctx, data.analyses, context.hasOpposingHoldings);
+    validateOppositionNotDropped(ctx, data.analyses, context.hasOpposingHoldings, oppositionGuard);
   });
 }

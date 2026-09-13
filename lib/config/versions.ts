@@ -14,7 +14,12 @@ import type { LlmProvider } from "../llm/provider";
  */
 export const PIPELINE_VERSION = "1.0.0";
 
-export const SCRATCHPAD_PROMPT_VERSION = "1.0.0";
+/**
+ * 1.1.0 — o prompt deixou de pedir o `id` de cada `evidenceCandidate` (agora atribuído em código,
+ * `lib/schemas/scratchpad.schema.ts`). Scratchpad em cache produzido pelo prompt anterior carrega
+ * id no formato antigo, então não pode ser servido como se fosse desta versão.
+ */
+export const SCRATCHPAD_PROMPT_VERSION = "1.1.0";
 
 export interface PipelineVersions {
   pipelineVersion: string;

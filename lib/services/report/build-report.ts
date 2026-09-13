@@ -84,10 +84,18 @@ function recordOmission(omissions: ReportOmission[], omission: ReportOmission): 
   if (!duplicate) omissions.push(omission);
 }
 
+const UNKNOWN_PROVENANCE = "Não informado";
+
+function provenanceOrUnknown(value: string | undefined): string {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : UNKNOWN_PROVENANCE;
+}
+
 /**
- * Converte a provenance de uma evidência verificada no contrato exibível. Devolve `undefined`
- * quando falta qualquer campo obrigatório ou a URL não é oficial: HU-27 manda bloquear **aquele
- * item**, não o relatório, então a ausência vira omissão registrada e o resto segue.
+ * Converte a provenance de uma evidência verificada no contrato exibível. A trava forte de HU-27 é
+ * URL oficial + trecho verificado na fonte. Metadados do TJPR como Câmara, relator, data ou número
+ * do processo melhoram a exibição, mas não podem sumir com uma decisão útil quando o portal não os
+ * entrega de forma consistente; nesses casos o relatório mostra a lacuna explicitamente.
  */
 function toReportSource(
   evidence: VerifiedEvidence,
@@ -95,20 +103,6 @@ function toReportSource(
   omissions: ReportOmission[],
 ): ReportSource | undefined {
   const { source } = evidence;
-  const missing = (["processNumber", "court", "chamber", "judge", "judgmentDate"] as const).filter(
-    (field) => !source[field]?.trim(),
-  );
-
-  if (missing.length > 0) {
-    recordOmission(omissions, {
-      legalIssueId,
-      kind: "MISSING_PROVENANCE",
-      subject: evidence.evidenceId,
-      reason: `Achado sem ${missing.join(", ")} — §3.10 exige precedente, Câmara, relator e data em todo item exibido.`,
-    });
-    return undefined;
-  }
-
   if (!isOfficialTjprUrl(source.url)) {
     recordOmission(omissions, {
       legalIssueId,
@@ -120,11 +114,11 @@ function toReportSource(
   }
 
   return {
-    processNumber: source.processNumber!,
-    court: source.court!,
-    chamber: source.chamber!,
-    judge: source.judge!,
-    judgmentDate: source.judgmentDate!,
+    processNumber: provenanceOrUnknown(source.processNumber),
+    court: provenanceOrUnknown(source.court),
+    chamber: provenanceOrUnknown(source.chamber),
+    judge: provenanceOrUnknown(source.judge),
+    judgmentDate: provenanceOrUnknown(source.judgmentDate),
     url: source.url,
     sourceHash: source.sourceHash,
   };

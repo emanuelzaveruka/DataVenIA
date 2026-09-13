@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  evidenceCandidateId,
   ScratchpadContentSchema,
   ScratchpadSchema,
   SCRATCHPAD_SCHEMA_VERSION,
@@ -13,7 +14,22 @@ import { createAppError } from "../../errors/app-error";
 import { toolFailure, toolSuccess, type ToolResult } from "../../errors/tool-result";
 import { hashBuffer } from "../document/hash";
 import { NO_SCRATCHPAD_CACHE, type ScratchpadCache } from "../../persistence/scratchpad-cache";
+import type { ConcurrencyLimiter } from "../../concurrency/create-concurrency-limiter";
 import { buildScratchpadPrompt, SCRATCHPAD_SYSTEM_PROMPT } from "./prompts";
+
+export interface ScratchpadTiming {
+  cacheMs: number;
+  fetchMs: number;
+  modelMs: number;
+  totalMs: number;
+}
+
+export interface GenerateScratchpadOptions {
+  cache?: ScratchpadCache;
+  signal?: AbortSignal;
+  limitFetch?: ConcurrencyLimiter;
+  limitModel?: ConcurrencyLimiter;
+}
 
 /**
  * `parseStructuredOutput` relata falhas de schema como uma lista de strings "path: message"
@@ -36,15 +52,38 @@ export async function generateScratchpad(
   candidate: RankedCandidate,
   provider: LlmProvider,
   jurisprudenceProvider: JurisprudenceProvider,
-  cache: ScratchpadCache = NO_SCRATCHPAD_CACHE,
-  signal?: AbortSignal,
+  cacheOrOptions: ScratchpadCache | GenerateScratchpadOptions = NO_SCRATCHPAD_CACHE,
+  legacySignal?: AbortSignal,
 ): Promise<ToolResult<DecisionScratchpad>> {
+  const options: GenerateScratchpadOptions =
+    "find" in cacheOrOptions
+      ? { cache: cacheOrOptions, signal: legacySignal }
+      : cacheOrOptions;
+  const {
+    cache = NO_SCRATCHPAD_CACHE,
+    signal,
+    limitFetch = (task) => task(),
+    limitModel = (task) => task(),
+  } = options;
+  const totalStartedAtMs = Date.now();
+  let fetchMs = 0;
+  let modelMs = 0;
+
   // HU-33 — a consulta ao cache vem antes do fetch e antes do modelo: reaproveitar depois de já
   // ter pago as duas chamadas não economizaria nada.
+  const cacheStartedAtMs = Date.now();
   const cached = await cache.find(candidate.item.id);
-  if (cached) return toolSuccess(cached, { source: "cache" });
+  const cacheMs = Date.now() - cacheStartedAtMs;
+  if (cached) {
+    return toolSuccess(cached, {
+      source: "cache",
+      timing: { cacheMs, fetchMs, modelMs, totalMs: Date.now() - totalStartedAtMs } satisfies ScratchpadTiming,
+    });
+  }
 
-  const decisionResult = await jurisprudenceProvider.fetchDecision(candidate.item.id);
+  const fetchStartedAtMs = Date.now();
+  const decisionResult = await limitFetch(() => jurisprudenceProvider.fetchDecision(candidate.item.id));
+  fetchMs = Date.now() - fetchStartedAtMs;
   if (decisionResult.isError) return decisionResult;
 
   const decision = decisionResult.data;
@@ -65,14 +104,18 @@ export async function generateScratchpad(
     );
   }
 
-  const result = await generateStructuredWithRetry(provider, {
-    system: SCRATCHPAD_SYSTEM_PROMPT,
-    prompt: buildScratchpadPrompt(candidate, decision),
-    schema: ScratchpadContentSchema,
-    schemaName: "DecisionScratchpadContent",
-    schemaDescription: "Análise estruturada de uma única decisão, classificada por proposição jurídica.",
-    signal,
-  });
+  const modelStartedAtMs = Date.now();
+  const result = await limitModel(() =>
+    generateStructuredWithRetry(provider, {
+      system: SCRATCHPAD_SYSTEM_PROMPT,
+      prompt: buildScratchpadPrompt(candidate, decision),
+      schema: ScratchpadContentSchema,
+      schemaName: "DecisionScratchpadContent",
+      schemaDescription: "Análise estruturada de uma única decisão, classificada por proposição jurídica.",
+      signal,
+    }),
+  );
+  modelMs = Date.now() - modelStartedAtMs;
 
   if (result.isError) {
     const { error } = result;
@@ -99,9 +142,17 @@ export async function generateScratchpad(
 
   const sourceHash = hashBuffer(Buffer.from(sourceText, "utf-8"));
 
+  const scratchpadId = randomUUID();
+
   const scratchpad: DecisionScratchpad = {
     ...result.data,
-    scratchpadId: randomUUID(),
+    scratchpadId,
+    // Como `source` e `scratchpadId`, o id de cada citação é montado aqui: identificador é
+    // responsabilidade do pipeline, e é o que a etapa seguinte usa para apontar a evidência.
+    evidenceCandidates: result.data.evidenceCandidates.map((candidate, index) => ({
+      ...candidate,
+      id: evidenceCandidateId(scratchpadId, index),
+    })),
     schemaVersion: SCRATCHPAD_SCHEMA_VERSION,
     source: {
       provider: "TJPR",
@@ -136,5 +187,8 @@ export async function generateScratchpad(
 
   await cache.save(candidate.item.id, parsed.data);
 
-  return toolSuccess(parsed.data);
+  return toolSuccess(parsed.data, {
+    source: "model",
+    timing: { cacheMs, fetchMs, modelMs, totalMs: Date.now() - totalStartedAtMs } satisfies ScratchpadTiming,
+  });
 }
