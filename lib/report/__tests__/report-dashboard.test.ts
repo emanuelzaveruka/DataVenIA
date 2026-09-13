@@ -115,22 +115,40 @@ describe("buildRelatorioDashboard", () => {
     }
   });
 
-  it("não expõe percentual nem score em campo nenhum (§3.10/HU-29)", async () => {
+  it("nunca deixa um percentual sem denominador ao lado (§3.10/HU-29)", async () => {
     const painel = buildRelatorioDashboard(await relatorioReal());
 
-    // A regra é estrutural: se um campo de razão/taxa aparecer aqui, a tela vai acabar exibindo.
+    // A regra mudou em 13/09/2026: percentual passou a ser permitido, mas só dentro de um
+    // `Indicador`, que carrega `total`. O que continua proibido é o número solto — é ele que se
+    // confunde com chance de êxito. Este teste guarda a nova invariante.
+    const soltos: string[] = [];
+    const visitar = (valor: unknown, caminho: string) => {
+      if (Array.isArray(valor)) {
+        valor.forEach((item, i) => visitar(item, `${caminho}[${i}]`));
+        return;
+      }
+      if (!valor || typeof valor !== "object") return;
+      const obj = valor as Record<string, unknown>;
+      if ("percentual" in obj && typeof obj.total !== "number") soltos.push(caminho);
+      for (const [chave, filho] of Object.entries(obj)) visitar(filho, `${caminho}.${chave}`);
+    };
+    visitar(painel, "painel");
+    expect(soltos).toEqual([]);
+
+    // E nenhum campo de razão/score cru sobreviveu.
     const chaves = JSON.stringify(painel).match(/"[a-zA-Zçãéêó]+":/g) ?? [];
-    const proibidas = chaves.filter((chave) =>
-      /percent|ratio|score|probabil|chance|taxa/i.test(chave),
-    );
-    expect(proibidas).toEqual([]);
+    expect(chaves.filter((c) => /ratio|score|probabil|chance|taxa/i.test(c))).toEqual([]);
   });
 
   it("sobrevive ao relatório sem precedente algum, sem inventar zero disfarçado", () => {
     const painel = buildRelatorioDashboard(relatorioVazio());
 
     expect(painel.precedentes).toEqual([]);
-    expect(painel.posicao).toEqual({ sustentam: 0, contrariam: 0, total: 0 });
+    expect(painel.posicao.sustentam).toBe(0);
+    expect(painel.posicao.contrariam).toBe(0);
+    expect(painel.posicao.total).toBe(0);
+    // Sem precedente nenhum o indicador não vira "0%": ele simplesmente não é exibido.
+    expect(painel.posicao.indicador.exibir).toBe(false);
     expect(painel.porCamara).toEqual([]);
     expect(painel.porAno).toEqual([]);
     expect(painel.periodo.maisAntiga).toBeUndefined();

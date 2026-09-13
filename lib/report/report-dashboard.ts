@@ -1,4 +1,5 @@
 import { isTribunalDoParana } from "../config/official-sources";
+import { montarIndicador, type Indicador } from "./indicadores";
 import type {
   FinalReport,
   ReportIssue,
@@ -22,15 +23,14 @@ import type {
  *
  * ## A regra que este arquivo existe para não quebrar
  *
- * **Contagem absoluta com denominador visível, nunca percentual de êxito.** §3.10 e HU-29 proíbem o
- * produto de sugerir probabilidade de ganho, e `ReportTrend` foi desenhado sem campo de percentual
- * exatamente por isso. "6 de 9 decisões sustentam a tese" é fato sobre a amostra; "67% de chance"
- * é previsão — e a diferença entre as duas, ao lado de um número grande na tela, é invisível para
- * quem lê com pressa. Por isso nenhuma função abaixo devolve razão, taxa ou score: só inteiros e o
- * total de onde saíram.
+ * **Nenhum percentual viaja sem o denominador ao lado.** §3.10 e HU-29 proíbem o produto de sugerir
+ * probabilidade de ganho; percentual de amostra não é isso, mas a diferença some quando o número
+ * aparece sozinho. Por isso proporção nunca é um `number` solto neste módulo: ela sai dentro de um
+ * `Indicador` (`./indicadores.ts`), que carrega `valor`, `total` e a decisão de exibir ou não
+ * conforme o tamanho da base — 3 decisões não sustentam um "67%".
  *
- * Proporção para desenhar barra é calculada na hora de desenhar, a partir de valor e total — não
- * é um número que este módulo entrega, porque não é um número que o usuário deva ler.
+ * Até 13/09/2026 o módulo só entregava contagem absoluta. A escala por base amostral veio da
+ * analista e está registrada em `docs/escopo.md`.
  */
 
 /** Posição da decisão citada em relação à tese do cliente. Categórica, nunca uma escala. */
@@ -59,6 +59,11 @@ export interface ContagemPorChave {
   total: number;
   sustentam: number;
   contrariam: number;
+  /**
+   * "Quantos sustentam", com a base sendo o total DESTE recorte — não o do relatório. Uma câmara
+   * com três decisões não ganha percentual só porque o relatório inteiro tem trinta.
+   */
+  indicador: Indicador;
 }
 
 export interface QuestaoResumo {
@@ -74,6 +79,8 @@ export interface QuestaoResumo {
   sustentam: number;
   contrariam: number;
   mistas: number;
+  /** Sustentam sobre analisadas nesta questão. Base: `trend.analyzedCount`. */
+  indicadorSustentam: Indicador;
   padraoDaCamara?: string;
   /** HU-22: quando não há contrários, o relatório diz POR QUE — e o painel repete, não esconde. */
   avisoSemContrarios?: string;
@@ -111,7 +118,7 @@ export interface RelatorioDashboard {
     camaras: number;
     relatores: number;
   };
-  posicao: { sustentam: number; contrariam: number; total: number };
+  posicao: { sustentam: number; contrariam: number; total: number; indicador: Indicador };
   periodo: { maisAntiga?: string; maisRecente?: string };
   porCamara: ContagemPorChave[];
   porRelator: ContagemPorChave[];
@@ -152,11 +159,21 @@ function contarPor(
   for (const linha of linhas) {
     const chave = chaveDe(linha);
     if (!chave) continue;
-    const atual = mapa.get(chave) ?? { chave, total: 0, sustentam: 0, contrariam: 0 };
+    const atual = mapa.get(chave) ?? {
+      chave,
+      total: 0,
+      sustentam: 0,
+      contrariam: 0,
+      indicador: montarIndicador(0, 0),
+    };
     atual.total += 1;
     if (linha.posicao === "SUSTENTA") atual.sustentam += 1;
     else atual.contrariam += 1;
     mapa.set(chave, atual);
+  }
+
+  for (const grupo of mapa.values()) {
+    grupo.indicador = montarIndicador(grupo.sustentam, grupo.total);
   }
 
   // Empate desempatado pelo nome para a ordem não dançar entre execuções iguais.
@@ -224,6 +241,7 @@ export function buildRelatorioDashboard(report: FinalReport): RelatorioDashboard
       sustentam,
       contrariam: precedentes.length - sustentam,
       total: precedentes.length,
+      indicador: montarIndicador(sustentam, precedentes.length),
     },
     periodo: { maisAntiga: datas[0], maisRecente: datas[datas.length - 1] },
     porCamara: contarPor(precedentes, (linha) => linha.chamber),
@@ -243,6 +261,7 @@ export function buildRelatorioDashboard(report: FinalReport): RelatorioDashboard
       sustentam: issue.trend.supportingCount,
       contrariam: issue.trend.opposingCount,
       mistas: issue.trend.mixedCount,
+      indicadorSustentam: montarIndicador(issue.trend.supportingCount, issue.trend.analyzedCount),
       padraoDaCamara: issue.chamberPattern,
       avisoSemContrarios: issue.contraryPointsNotice,
       riscos: issue.risks.length,

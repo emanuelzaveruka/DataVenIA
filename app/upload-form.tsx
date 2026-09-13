@@ -157,31 +157,53 @@ export function UploadForm() {
 
   const [isN8nModalOpen, setIsN8nModalOpen] = useState(false);
 
+  const [baixandoPdf, setBaixandoPdf] = useState(false);
+  const [erroPdf, setErroPdf] = useState<string | null>(null);
+
   /**
-   * Exportação em PDF via impressão do navegador, sobre o `@media print` de `globals.css`.
+   * Baixa o relatório em PDF nativo, gerado no servidor a partir do `runId`.
    *
-   * Não há biblioteca de PDF no projeto e a escolha não é só de custo: rasterizar a tela produziria
-   * um arquivo em que o texto não é selecionável nem pesquisável — e este documento existe para o
-   * advogado copiar citação e número de acórdão dele.
-   *
-   * O título do documento vira o nome sugerido do arquivo na caixa de salvar. Sem isso o PDF sai
-   * como "localhost" ou como o título da aba, e o advogado recebe uma pasta de arquivos
-   * indistinguíveis. É restaurado no `afterprint` para a aba não ficar renomeada depois.
+   * A fonte é o snapshot persistido da execução, nunca a tela: dois downloads do mesmo runId
+   * produzem o mesmo documento. Pela impressão do navegador isso não era possível — o formato de
+   * saída dependia do driver do usuário, e o PDF que o QA gerou saiu rasterizado, sem texto
+   * selecionável nem link clicável.
    */
-  function exportarPdf() {
-    if (!result) return;
+  async function baixarPdf() {
+    if (!result || baixandoPdf) return;
 
-    const tituloOriginal = document.title;
-    const base = result.fileName.replace(/\.[^.]+$/, "");
-    document.title = `Relatorio-${base}-${result.runId.slice(0, 8)}`;
+    setBaixandoPdf(true);
+    setErroPdf(null);
 
-    const restaurar = () => {
-      document.title = tituloOriginal;
-      window.removeEventListener("afterprint", restaurar);
-    };
-    window.addEventListener("afterprint", restaurar);
+    try {
+      const resposta = await fetch(`/api/reports/${result.runId}/pdf`);
 
-    window.print();
+      if (!resposta.ok) {
+        const corpo = (await resposta.json()) as UploadErrorBody;
+        setErroPdf(corpo.error?.userMessage ?? "Não foi possível gerar o PDF.");
+        return;
+      }
+
+      // O nome vem do servidor para ser o mesmo em qualquer navegador; o fallback existe só para
+      // o caso de um proxy comer o header.
+      const disposicao = resposta.headers.get("content-disposition") ?? "";
+      const nome =
+        /filename="([^"]+)"/.exec(disposicao)?.[1] ?? `Relatorio-${result.runId.slice(0, 8)}.pdf`;
+
+      const blob = await resposta.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = nome;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      // Recuperável: a execução continua no servidor, só o download falhou.
+      setErroPdf("Falha ao baixar o PDF. Verifique a conexão e tente novamente.");
+    } finally {
+      setBaixandoPdf(false);
+    }
   }
 
   // `buildPipelineProgress({})` devolve a mesma lista "tudo pendente" que antes era uma constante
@@ -334,8 +356,14 @@ export function UploadForm() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <Rotulo>Documento processado</Rotulo>
               <div className="nao-imprimir flex flex-wrap gap-2">
-                <Botao type="button" variante="primaria" onClick={exportarPdf}>
-                  Exportar PDF
+                <Botao
+                  type="button"
+                  variante="primaria"
+                  onClick={baixarPdf}
+                  disabled={baixandoPdf}
+                  aria-busy={baixandoPdf}
+                >
+                  {baixandoPdf ? "Gerando PDF…" : "Baixar PDF"}
                 </Botao>
                 <Link
                   href="/relatorio"
@@ -348,6 +376,15 @@ export function UploadForm() {
                 </Botao>
               </div>
             </div>
+
+            {erroPdf && (
+              <p
+                role="status"
+                className="nao-imprimir mt-3 border-l-[3px] border-l-vn-critico bg-vn-papel-50 p-3 text-rotulo leading-relaxed text-vn-texto"
+              >
+                {erroPdf}
+              </p>
+            )}
 
             <p className="mt-3 text-apoio text-vn-texto">
               {result.fileName}
