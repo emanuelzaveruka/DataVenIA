@@ -315,7 +315,7 @@ decisão é analisada isolada das outras (<em>Map</em>), só então as análises
     <div class="phase-name">Entendimento e busca</div>
     <div class="nodes">
       <div class="node llm"><span class="n">05</span><span class="t">Case Understanding</span><span class="d">fatos, partes, pedidos, questões jurídicas</span></div>
-      <div class="node llm"><span class="n">06</span><span class="t">Query Builder</span><span class="d">várias buscas, uma delas contrária</span></div>
+      <div class="node"><span class="n">06</span><span class="t">Query Builder</span><span class="d">1 query, a partir de até 5 keywords do usuário</span></div>
       <div class="node"><span class="n">07</span><span class="t">Busca &amp; pré-ranking (TJPR)</span><span class="d">funil 150 → 30 → 10</span></div>
     </div>
   </div>
@@ -373,8 +373,8 @@ decisão é analisada isolada das outras (<em>Map</em>), só então as análises
     <tr><td>03 Extração</td><td>bytes</td><td>extrai texto de PDF/DOCX/TXT</td><td>texto + nº de páginas</td><td>não</td><td><code>services/document/parse-document.ts</code></td></tr>
     <tr><td>04 Sanitização</td><td>texto extraído</td><td>mascara CPF/CNPJ, endereço, telefone, e-mail, nomes</td><td>texto sanitizado + lista de máscaras</td><td>não</td><td><code>services/document/sanitize.ts</code></td></tr>
     <tr><td>05 Case Understanding</td><td>texto sanitizado</td><td>extrai fatos, partes, pedidos e questões jurídicas</td><td><code>CaseAnalysis</code></td><td><strong>sim</strong></td><td><code>services/case-analysis/</code></td></tr>
-    <tr><td>06 Query Builder</td><td><code>CaseAnalysis</code></td><td>monta várias buscas, com ao menos uma contrária</td><td><code>SearchQueryPlan</code></td><td><strong>sim</strong></td><td><code>services/query-generation/</code></td></tr>
-    <tr><td>07 Busca &amp; pré-ranking</td><td>queries</td><td>busca no TJPR, deduplica, pontua e seleciona por Câmara</td><td>até 10 candidatos</td><td>não</td><td><code>services/jurisprudence/</code></td></tr>
+    <tr><td>06 Query Builder</td><td>keywords escolhidas pelo usuário (até 5)</td><td>junta as keywords numa única query</td><td>1 query</td><td>não</td><td><code>workflow/run-pipeline.ts</code></td></tr>
+    <tr><td>07 Busca &amp; pré-ranking</td><td>a query única</td><td>busca no TJPR (relaxando palavras se zerar), pontua e seleciona por Câmara</td><td>até 10 candidatos</td><td>não</td><td><code>services/jurisprudence/</code>, <code>providers/tjpr.ts</code></td></tr>
     <tr><td>08 Scratchpads (MAP)</td><td>candidatos selecionados</td><td>lê cada decisão isoladamente e classifica por proposição</td><td>1 <code>DecisionScratchpad</code> por decisão</td><td><strong>sim</strong></td><td><code>services/scratchpad/</code></td></tr>
     <tr><td>09 Cross-file (REDUCE)</td><td>Scratchpads válidos + <code>CaseAnalysis</code></td><td>cruza as fichas e identifica o padrão do órgão julgador</td><td><code>CrossFileAnalysis</code></td><td><strong>sim</strong></td><td><code>services/cross-file/</code></td></tr>
     <tr><td>10 Verificação (VERIFY)</td><td>análise cruzada + Scratchpads</td><td>reabre as decisões e compara cada citação com o original</td><td><code>VerifiedEvidence[]</code></td><td>não</td><td><code>services/evidence/</code></td></tr>
@@ -430,20 +430,22 @@ argumentos de cada lado, leis e precedentes citados e resumo das provas.</p>
 <p>Os <code>id</code> das questões geradas aqui viram o universo de identificadores válidos das
 etapas 06 e 09 — nenhuma delas pode inventar um id fora desta lista.</p>
 
-<h3>06 · Query Builder <span style="color:var(--green-ink)">(IA)</span></h3>
-<p>Gera <strong>várias</strong> buscas, cada uma com justificativa explícita e uma intenção declarada:
-<code>MAIN_THESIS</code> (a tese principal), <code>CONTRARY</code> (jurisprudência contrária) ou
-<code>RELATED</code> (teses correlatas).</p>
+<h3>06 · Query Builder</h3>
+<p><strong>Decisão de 2026-09-13: deixou de ser uma etapa de IA.</strong> Não há mais modelo gerando
+buscas — o usuário escolhe, na tela de envio, até 5 palavras-chave (sugeridas a partir do próprio
+documento por uma leitura barata sem modelo, ou digitadas por ele) e elas viram, juntas, a
+<strong>única</strong> query enviada ao TJPR.</p>
 <div class="note key">
-  <b>Pelo menos uma busca contrária é obrigatória</b> — e a obrigação não depende do prompt: o
-  formato de resposta é montado por execução e <strong>rejeita</strong> um conjunto sem nenhuma
-  query <code>CONTRARY</code>. Um resultado que só confirma a tese do cliente é inútil para quem vai
-  a julgamento.
+  <b>Por quê:</b> a busca do TJPR é <em>AND estrito</em> — cada palavra a mais numa query reduz a
+  contagem de resultados exponencialmente, e queries geradas por modelo (mais longas, mais
+  "naturais") derrubavam a amostra a quase zero candidatos. Uma lista curta, escolhida pelo próprio
+  usuário, é mais previsível e mais barata do que uma LLM tentando adivinhar palavras-chave.
 </div>
 
 <h3>07 · Busca, funil e pré-ranking</h3>
-<p>Cada query vai ao TJPR; os resultados são unidos e deduplicados por identificador de decisão. A
-partir daí, três cortes determinísticos, sem nenhuma IA:</p>
+<p>A query única vai ao TJPR. Se ela zerar (nenhum resultado), o provider tenta de novo descartando
+a última palavra, até achar algo ou sobrar uma só — a mesma regra do AND estrito, aplicada ao
+contrário. A partir do que voltou, três cortes determinísticos, sem nenhuma IA:</p>
 <table>
   <thead><tr><th>Corte</th><th>Limite</th><th>Regra</th></tr></thead>
   <tbody>
@@ -539,21 +541,21 @@ classificação legítima, com motivo explícito, nunca um lado forçado.</p>
 <!-- ================================================================= -->
 <h2 id="s5" class="page-break">5. Onde a IA é usada de fato</h2>
 
-<p>Quatro chamadas. Não há nenhuma outra no projeto inteiro — nenhum serviço importa SDK de modelo,
+<p>Três chamadas. Não há nenhuma outra no projeto inteiro — nenhum serviço importa SDK de modelo,
 e não existe dependência de SDK no <code>package.json</code>: todos os provedores são
-<code>fetch</code> puro.</p>
+<code>fetch</code> puro. O Query Builder (etapa 06) não está nesta lista desde 2026-09-13: ele
+monta a query a partir de keywords que o próprio usuário escolhe, sem chamar modelo nenhum.</p>
 
 <table>
   <thead><tr><th style="width:22%">Chamada</th><th style="width:12%">Quantas vezes</th><th>O que ela decide</th></tr></thead>
   <tbody>
     <tr><td><strong>Case Understanding</strong></td><td>1 por execução</td><td>o que o caso é: fatos, partes, pedidos, questões jurídicas</td></tr>
-    <tr><td><strong>Query Builder</strong></td><td>1 por execução</td><td>que buscas fazer e por quê</td></tr>
     <tr><td><strong>Scratchpad</strong></td><td><strong>1 por decisão</strong> (até 10, pool de 4)</td><td>o que cada decisão sustenta, proposição por proposição</td></tr>
     <tr><td><strong>Cross-File</strong></td><td>1 por execução</td><td>o padrão do conjunto, os riscos e os argumentos</td></tr>
   </tbody>
 </table>
 
-<p>Numa execução completa isso dá, no pior caso, <strong>13 chamadas</strong> (1 + 1 + 10 + 1) — e
+<p>Numa execução completa isso dá, no pior caso, <strong>12 chamadas</strong> (1 + 10 + 1) — e
 menos quando o cache de fichas responde.</p>
 
 <h3>E as sete etapas que não usam modelo nenhum</h3>
@@ -620,34 +622,13 @@ propósito ou não, uma frase como “ignore as instruções anteriores”. Ele 
 declarado <em>dado</em> logo na primeira regra — a defesa básica contra injeção de prompt, aplicada
 em todas as fronteiras onde entra texto de terceiros.</p>
 
-<h3>6.2 · Query Builder</h3>
+<h3>6.2 · Query Builder — sem prompt, desde 2026-09-13</h3>
 
-<div class="prompt">
-  <div class="label">System</div>
-  <pre>Você é um assistente jurídico que gera estratégias de busca de jurisprudência a partir da análise de um caso.
-
-Regras estritas:
-- Gere MÚLTIPLAS queries, nunca apenas uma busca óbvia.
-- O conjunto deve necessariamente incluir ao menos uma query com intent "CONTRARY" (jurisprudência contrária à tese do cliente) — não apenas queries favoráveis. Isso é requisito de produto: o advogado precisa ver o que pode contrariar a tese, não só o que a confirma.
-- Toda query tem um "reason" explícito explicando a estratégia de busca e um "intent" ("MAIN_THESIS" para a tese principal, "CONTRARY" para jurisprudência contrária, "RELATED" para teses correlatas).
-- Toda query deve referenciar, em "legalIssueId", o "id" de uma das questões jurídicas listadas abaixo — nunca invente um id novo.</pre>
-</div>
-
-<div class="prompt">
-  <div class="label user">User</div>
-  <pre>Questões jurídicas identificadas no caso:
-<span class="var">- id="LI-1" | tópico: … | questão: … | relevância: HIGH
-- id="LI-2" | …</span>
-
-Fatos: <span class="var">{fatos separados por " | "}</span>
-Argumentos do cliente: <span class="var">{…}</span>
-Argumentos da parte contrária: <span class="var">{…}</span>
-
-Gere um conjunto de queries de pesquisa de jurisprudência cobrindo, no mínimo, a tese principal do cliente e jurisprudência contrária, além de teses correlatas relevantes quando fizer sentido. Cada query deve referenciar o id de uma das questões jurídicas acima.</pre>
-</div>
-
-<p>Note a ausência de marcadores <code>&lt;…&gt;</code> aqui: a entrada desta chamada não é texto do
-usuário, é saída estruturada e já validada da etapa anterior.</p>
+<p>Esta etapa não chama modelo nenhum. Não há prompt para mostrar aqui: o que ela faz é juntar, com
+um espaço entre cada uma, as keywords que o usuário selecionou (ou digitou) na tela de envio — no
+máximo 5 — e normalizar o resultado (minúsculas, sem acento, sem conectores) antes de enviar ao
+TJPR. A motivação é a mesma da etapa 07: a busca do TJPR é AND estrito, e uma LLM gerando frases
+mais longas derrubava a contagem de resultados a quase zero.</p>
 
 <h3>6.3 · Scratchpad (uma chamada por decisão)</h3>
 
@@ -849,7 +830,7 @@ o pipeline parou.</p>
   <thead><tr><th style="width:32%">Linha</th><th style="width:13%">Contagem</th><th>O que ela significa</th></tr></thead>
   <tbody>
     <tr><td><strong>Documento processado</strong></td><td>—</td><td>arquivo validado, texto extraído e dados pessoais mascarados.</td></tr>
-    <tr><td><strong>Queries de pesquisa geradas</strong></td><td>nº de buscas</td><td>as estratégias de busca montadas, incluindo pelo menos uma contrária.</td></tr>
+    <tr><td><strong>Palavras-chave selecionadas</strong></td><td>até 5</td><td>as keywords que o usuário marcou/digitou, que formam a única query enviada ao TJPR.</td></tr>
     <tr><td><strong>Candidatos encontrados</strong></td><td>nº de acórdãos</td><td>total devolvido pelo TJPR, já sem repetições.</td></tr>
     <tr><td><strong>Decisões selecionadas para análise profunda</strong></td><td>até 10</td><td>as que seguem para leitura integral, alternando entre Câmaras.</td></tr>
     <tr><td><strong>Scratchpads válidos</strong></td><td>nº de fichas</td><td>decisões analisadas com sucesso. Mínimo de 3 para continuar.</td></tr>

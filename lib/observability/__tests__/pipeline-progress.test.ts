@@ -7,7 +7,7 @@ describe("buildPipelineProgress (HU-35/§11.9)", () => {
 
     expect(steps.map((step) => step.label)).toEqual([
       "Documento processado",
-      "Queries de pesquisa geradas",
+      "Palavras-chave selecionadas",
       "Candidatos encontrados",
       "Decisões selecionadas para análise profunda",
       "Scratchpads válidos",
@@ -18,7 +18,7 @@ describe("buildPipelineProgress (HU-35/§11.9)", () => {
   });
 
   it("keeps pending steps visible instead of hiding them — the user needs to see where it stopped", () => {
-    const steps = buildPipelineProgress({ documentParsed: true, queriesGenerated: 4 });
+    const steps = buildPipelineProgress({ documentParsed: true, keywordsSelected: 4 });
 
     expect(steps).toHaveLength(8);
     expect(steps.filter((step) => step.status === "DONE")).toHaveLength(2);
@@ -28,7 +28,7 @@ describe("buildPipelineProgress (HU-35/§11.9)", () => {
   it("exposes the counts each stage produced", () => {
     const steps = buildPipelineProgress({
       documentParsed: true,
-      queriesGenerated: 4,
+      keywordsSelected: 4,
       candidatesFound: 30,
       decisionsSelected: 10,
       validScratchpads: 9,
@@ -62,7 +62,7 @@ describe("buildPipelineProgress (HU-35/§11.9)", () => {
   it("marks the first unfinished step as FAILED when the run ended in error", () => {
     const steps = buildPipelineProgress({
       documentParsed: true,
-      queriesGenerated: 4,
+      keywordsSelected: 4,
       candidatesFound: 12,
       failed: true,
     });
@@ -80,16 +80,16 @@ describe("buildPipelineProgress (HU-35/§11.9)", () => {
   });
 
   it("fails the empty step rather than the pending one after it", () => {
-    const steps = buildPipelineProgress({ documentParsed: true, queriesGenerated: 0, failed: true });
+    const steps = buildPipelineProgress({ documentParsed: true, keywordsSelected: 0, failed: true });
 
-    expect(steps.find((step) => step.label === "Queries de pesquisa geradas")?.status).toBe("FAILED");
+    expect(steps.find((step) => step.label === "Palavras-chave selecionadas")?.status).toBe("FAILED");
     expect(steps.find((step) => step.label === "Candidatos encontrados")?.status).toBe("PENDING");
   });
 
   it("leaves a fully successful run untouched even if failed is false", () => {
     const steps = buildPipelineProgress({
       documentParsed: true,
-      queriesGenerated: 4,
+      keywordsSelected: 4,
       candidatesFound: 30,
       decisionsSelected: 10,
       validScratchpads: 9,

@@ -24,7 +24,8 @@ export interface PipelineProgressStep {
 
 export interface PipelineProgressInput {
   documentParsed?: boolean;
-  queriesGenerated?: number;
+  /** Quantas keywords o usuário selecionou para compor a query única (não mais N queries da LLM). */
+  keywordsSelected?: number;
   candidatesFound?: number;
   decisionsSelected?: number;
   validScratchpads?: number;
@@ -47,9 +48,9 @@ function fromFlag(flag: boolean | undefined): PipelineStepStatus {
 }
 
 /**
- * Progresso etapa a etapa exigido por §11.9/HU-35 — "documento processado, N queries geradas, N
- * candidatos encontrados, N decisões selecionadas, N Scratchpads válidos, cross-file completo, N
- * evidências verificadas, relatório pronto".
+ * Progresso etapa a etapa exigido por §11.9/HU-35 — "documento processado, N palavras-chave
+ * selecionadas, N candidatos encontrados, N decisões selecionadas, N Scratchpads válidos,
+ * cross-file completo, N evidências verificadas, relatório pronto".
  *
  * É função pura sobre contagens, não um observador acoplado ao pipeline: quem tem os artefatos
  * (a rota, a página, um teste) monta a lista sem que nenhum serviço precise reportar progresso.
@@ -68,9 +69,9 @@ export function buildPipelineProgress(input: PipelineProgressInput): PipelinePro
     },
     {
       stage: "QUERY_GENERATION",
-      label: "Queries de pesquisa geradas",
-      count: input.queriesGenerated,
-      status: fromCount(input.queriesGenerated),
+      label: "Palavras-chave selecionadas",
+      count: input.keywordsSelected,
+      status: fromCount(input.keywordsSelected),
     },
     {
       stage: "SEARCH",

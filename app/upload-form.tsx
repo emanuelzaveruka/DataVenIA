@@ -71,6 +71,13 @@ export function UploadForm() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!file) return;
+    // Desde 2026-09-13 não há mais LLM gerando query: sem ao menos uma palavra-chave selecionada,
+    // não há o que buscar no TJPR. `/api/documents` recusaria do mesmo jeito — checar aqui poupa a
+    // viagem e dá o motivo na hora, antes de abrir o stream.
+    if (termos.length === 0) {
+      setErrorMessage("Selecione ao menos uma palavra-chave de busca antes de analisar.");
+      return;
+    }
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -85,7 +92,7 @@ export function UploadForm() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      if (termos.length > 0) formData.append("terms", JSON.stringify(termos));
+      formData.append("terms", JSON.stringify(termos));
       if (camara) formData.append("judgingBody", camara);
       const inicio = inicioDoPeriodo(periodo);
       if (inicio) formData.append("periodStart", inicio);
@@ -244,7 +251,12 @@ export function UploadForm() {
                   </Botao>
                 </>
               ) : (
-                <Botao type="submit" variante="primaria" disabled={!file} className="flex-1">
+                <Botao
+                  type="submit"
+                  variante="primaria"
+                  disabled={!file || termos.length === 0}
+                  className="flex-1"
+                >
                   Enviar documento
                 </Botao>
               )}

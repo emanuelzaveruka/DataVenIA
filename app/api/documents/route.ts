@@ -7,6 +7,7 @@ import { getRepository } from "../../../lib/persistence/get-repository";
 import { getAuditLevel } from "../../../lib/config/audit";
 import { getLogLevel } from "../../../lib/config/logging";
 import { statusForError } from "../../../lib/errors/http-status";
+import { MAX_USER_KEYWORDS } from "../../../lib/config/limits";
 import type { AppError } from "../../../lib/errors/app-error";
 import {
   runPipeline,
@@ -16,8 +17,12 @@ import {
 
 export const runtime = "nodejs";
 
-/** Teto de 20 e 120 caracteres: campo de termo, não caixa de texto livre para colar a peça. */
-const TermsSchema = z.array(z.string().trim().min(1).max(120)).max(20);
+/**
+ * Teto de 120 caracteres: campo de palavra-chave, não caixa de texto livre para colar a peça.
+ * `.min(1)` no array: desde que a LLM parou de gerar query nenhuma (2026-09-13), a busca inteira
+ * depende do que o usuário escolheu aqui — vazio não é "roda sem recorte", é "não há o que buscar".
+ */
+const KeywordsSchema = z.array(z.string().trim().min(1).max(120)).min(1).max(MAX_USER_KEYWORDS);
 
 function safeJsonParse(texto: string): unknown {
   try {
@@ -100,31 +105,38 @@ export async function POST(request: Request) {
   const bytes = Buffer.from(await file.arrayBuffer());
 
   /**
-   * Termos e recorte escolhidos na tela de envio. São opcionais: sem eles o pipeline roda
-   * exatamente como antes, com as queries que o modelo gerar.
-   *
-   * Entrada externa é validada, não confiada — mas aqui um campo malformado vira 400 em vez de ser
-   * ignorado em silêncio. Analisar a peça descartando o que o usuário digitou produziria um
-   * relatório que parece certo e não cobriu o que ele pediu, que é pior do que recusar.
+   * Palavras-chave e recorte escolhidos na tela de envio. Desde 2026-09-13 as palavras-chave não
+   * são mais opcionais: não há LLM gerando query nenhuma, então sem elas o pipeline não tem o que
+   * buscar. Recusa com 400 em vez de deixar `runPipeline` falhar no meio do stream — é o mesmo
+   * princípio de sempre: entrada externa malformada vira erro explícito, nunca é ignorada em
+   * silêncio.
    */
   const termosBrutos = formData.get("terms");
-  let extraTerms: string[] | undefined;
-
-  if (typeof termosBrutos === "string" && termosBrutos.trim().length > 0) {
-    const parsed = TermsSchema.safeParse(safeJsonParse(termosBrutos));
-    if (!parsed.success) {
-      return NextResponse.json(
-        {
-          error: {
-            code: "INVALID_SEARCH_TERMS",
-            userMessage: "Os termos de busca enviados não são válidos.",
-          },
+  if (typeof termosBrutos !== "string" || termosBrutos.trim().length === 0) {
+    return NextResponse.json(
+      {
+        error: {
+          code: "MISSING_SEARCH_KEYWORDS",
+          userMessage: "Selecione ao menos uma palavra-chave de busca antes de analisar.",
         },
-        { status: 400 },
-      );
-    }
-    extraTerms = parsed.data;
+      },
+      { status: 400 },
+    );
   }
+
+  const parsedKeywords = KeywordsSchema.safeParse(safeJsonParse(termosBrutos));
+  if (!parsedKeywords.success) {
+    return NextResponse.json(
+      {
+        error: {
+          code: "INVALID_SEARCH_KEYWORDS",
+          userMessage: `Selecione entre 1 e ${MAX_USER_KEYWORDS} palavras-chave de busca válidas.`,
+        },
+      },
+      { status: 400 },
+    );
+  }
+  const keywords = parsedKeywords.data;
 
   const judgingBody = formData.get("judgingBody");
   const periodStart = formData.get("periodStart");
@@ -166,7 +178,7 @@ export async function POST(request: Request) {
             runId: randomUUID(),
             traceId: randomUUID(),
             file: { name: file.name, size: file.size, type: file.type, bytes },
-            extraTerms,
+            keywords,
             filters,
           },
           {

@@ -4,7 +4,6 @@ import { toStrictJsonSchema } from "../to-strict-json-schema";
 import { buildCrossFileAnalysisResponseSchema } from "../../schemas/cross-file.schema";
 import { CaseAnalysisSchema } from "../../schemas/case-analysis.schema";
 import { ScratchpadContentSchema } from "../../schemas/scratchpad.schema";
-import { buildSearchQueryPlanSchema } from "../../schemas/query-generation.schema";
 
 const crossFileStrict = toStrictJsonSchema(
   z.toJSONSchema(
@@ -84,7 +83,6 @@ describe("toStrictJsonSchema — todos os schemas de LLM do pipeline", () => {
   const schemas: [string, z.ZodType<unknown>][] = [
     ["CaseAnalysis", CaseAnalysisSchema],
     ["Scratchpad", ScratchpadContentSchema],
-    ["SearchQueryPlan", buildSearchQueryPlanSchema(["LI-1"])],
     ["CrossFileAnalysis", buildCrossFileAnalysisResponseSchema({
       legalIssueIds: ["LI-1"], scratchpadIds: ["SP-1"], evidenceIds: ["EV-1"], hasOpposingHoldings: false,
     })],

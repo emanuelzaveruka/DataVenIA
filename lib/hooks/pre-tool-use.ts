@@ -5,7 +5,6 @@ export const TOOL_NAMES = [
   "parseDocument",
   "sanitizeDocument",
   "analyzeCase",
-  "generateSearchQueries",
   "searchJurisprudence",
   "generateScratchpads",
   "analyzeCrossFile",
@@ -21,7 +20,9 @@ export type ToolName = (typeof TOOL_NAMES)[number];
  */
 export const STAGE_TOOL_ALLOWLIST: Record<WorkflowStage, readonly ToolName[]> = {
   DOCUMENT_ANALYSIS: ["validateFile", "parseDocument", "sanitizeDocument", "analyzeCase"],
-  QUERY_GENERATION: ["generateSearchQueries"],
+  // Montar a query a partir das keywords escolhidas pelo usuário é operação pura local — não passa
+  // pela porta única de execução, então não há tool nenhuma a permitir nesta etapa.
+  QUERY_GENERATION: [],
   SEARCH: ["searchJurisprudence"],
   SCRATCHPAD_GENERATION: ["generateScratchpads"],
   CROSS_FILE_ANALYSIS: ["analyzeCrossFile"],

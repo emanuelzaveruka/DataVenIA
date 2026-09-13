@@ -44,11 +44,11 @@ const SUB_AGENTS: SubAgentDefinition[] = [
   {
     id: "agent-query-builder",
     name: "Agente Query Builder",
-    role: "Estratégia de Pesquisa Jurídica",
+    role: "Montagem da Query de Busca",
     icon: "🎯",
     stages: ["QUERY_GENERATION"],
     hus: "HU-11",
-    description: "Formula pesquisas booleanas e termos otimizados direcionados às Câmaras Cíveis do TJPR.",
+    description: "Monta a query única enviada ao TJPR a partir das palavras-chave escolhidas pelo usuário na tela de envio.",
   },
   {
     id: "agent-tjpr-crawler",

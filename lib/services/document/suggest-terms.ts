@@ -6,10 +6,11 @@
  * lista que ele talvez descarte inteira seria caro no lugar errado. Sendo determinística, ela
  * também funciona sem credencial nenhuma, que é o critério de aceite 16.
  *
- * Ela NÃO substitui `analyzeCase`/`generateSearchQueries` (HU-07/HU-11): esses continuam rodando no
- * pipeline e continuam sendo quem entende o caso. O que sai daqui é matéria-prima para o usuário
- * editar — os termos dele SOMAM às queries do modelo, nunca as substituem, e é por isso que a busca
- * por jurisprudência contrária continua garantida sem nenhuma regra extra.
+ * Ela NÃO substitui `analyzeCase` (HU-07): esse continua rodando no pipeline e continua sendo quem
+ * entende o caso para o resto do fluxo (pré-ranking, cross-file, relatório). O que sai daqui é
+ * matéria-prima para o usuário escolher — desde 2026-09-13 os termos que ele marcar/digitar aqui
+ * (até `MAX_USER_KEYWORDS`, ver `lib/config/limits.ts`) são a ÚNICA busca feita no TJPR; não há
+ * mais uma LLM gerando query em paralelo.
  *
  * Duas fontes, nesta ordem de confiança:
  *

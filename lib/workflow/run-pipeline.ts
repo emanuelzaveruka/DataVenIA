@@ -4,7 +4,6 @@ import { validateFile } from "../services/document/validate-file";
 import { parseDocument } from "../services/document/parse-document";
 import { sanitizeDocument } from "../services/document/sanitize";
 import { analyzeCase } from "../services/case-analysis/analyze-case";
-import { generateSearchQueries } from "../services/query-generation/generate-queries";
 import { applySearchFunnel } from "../services/jurisprudence/search-funnel";
 import { buildPreRankingContext, rankCandidates } from "../services/jurisprudence/pre-rank";
 import { selectForScratchpad } from "../services/jurisprudence/select-candidates";
@@ -32,6 +31,7 @@ import {
 import { createGuardedExecution } from "../hooks/guarded-execution";
 import { PIPELINE_VERSION, scratchpadVersions } from "../config/versions";
 import {
+  MAX_USER_KEYWORDS,
   MIN_VALID_SCRATCHPADS,
   SCRATCHPAD_LIMIT,
   SEARCH_CANDIDATE_LIMIT,
@@ -57,7 +57,6 @@ import type { LlmProvider } from "../llm/provider";
 import type { JurisprudenceProvider } from "../providers/jurisprudence-provider";
 import type { FinalReport } from "../schemas/report.schema";
 import type { RedactionSummary } from "../schemas/sanitization.schema";
-import type { SearchQuery } from "../schemas/query-generation.schema";
 import type { JurisprudenceQueryFilters } from "../schemas/search.schema";
 
 const INITIAL_STAGE = "DOCUMENT_ANALYSIS" as const;
@@ -92,12 +91,14 @@ export interface RunPipelineInput {
   traceId: string;
   file: PipelineFileInput;
   /**
-   * Termos escritos pelo usuário na tela de envio. **Somam** às queries de `generateSearchQueries`,
-   * nunca as substituem — é o que mantém de graça a garantia de HU-11 (existe busca por
-   * jurisprudência contrária) sem precisar validar nada do que o usuário digitou: o conjunto do
-   * modelo continua inteiro ali dentro.
+   * Palavras-chave escolhidas pelo usuário na tela de envio — sugeridas a partir da peça (sem
+   * modelo, `suggestSearchTerms`) ou digitadas por ele, até `MAX_USER_KEYWORDS`.
+   *
+   * Decisão de 2026-09-13: deixaram de ser um extra que **somava** às queries de uma LLM. Não há
+   * mais LLM gerando query nenhuma — estas palavras são, sozinhas, a única busca feita no TJPR.
+   * Sem elas o pipeline não tem o que buscar e falha na etapa QUERY_GENERATION.
    */
-  extraTerms?: string[];
+  keywords?: string[];
   /** Recorte escolhido pelo usuário (Câmara, período). Vale para TODAS as queries do plano. */
   filters?: JurisprudenceQueryFilters;
 }
@@ -186,6 +187,25 @@ function insufficientScratchpadsError(validCount: number): AppError {
 
 function dedupeSearchItems(items: JurisprudenceSearchItem[]): JurisprudenceSearchItem[] {
   return [...new Map(items.map((item) => [item.id, item])).values()];
+}
+
+/** Ordem preservada, sem vazio e sem repetição — mesma regra que os termos do usuário já seguiam. */
+function dedupeKeywords(keywords: string[]): string[] {
+  return keywords
+    .map((keyword) => keyword.trim())
+    .filter((keyword, index, all) => keyword.length > 0 && all.indexOf(keyword) === index);
+}
+
+function missingKeywordsError(): AppError {
+  return createAppError({
+    code: "MISSING_SEARCH_KEYWORDS",
+    category: "BUSINESS_RULE",
+    severity: "ERROR",
+    description: "No keyword was selected to build the single TJPR search query",
+    userMessage: "Selecione ao menos uma palavra-chave de busca antes de analisar.",
+    isRetryable: false,
+    operation: "buildSearchQuery",
+  });
 }
 
 function errorDetail(error: AppError): NodeExecutionDetail["error"] {
@@ -603,169 +623,147 @@ async function* pipelineEvents(
   }
   currentStage = "QUERY_GENERATION";
 
+  /**
+   * Decisão de 2026-09-13: a LLM deixou de gerar as queries de busca. O usuário escolhe até
+   * `MAX_USER_KEYWORDS` palavras-chave na tela de envio — sugeridas a partir da peça, sem modelo
+   * (`suggestSearchTerms`), ou digitadas por ele — e elas viram, sozinhas, a ÚNICA query enviada ao
+   * TJPR (nunca mais de uma busca por execução). `lib/providers/tjpr.ts` relaxa a query internamente
+   * quando ela zera (a busca do TJPR é AND estrito), o que cobre o caso de o usuário empilhar as 5
+   * palavras e a combinação inteira não bater em nada.
+   */
+  const keywordsSelecionadas = dedupeKeywords(input.keywords ?? []).slice(0, MAX_USER_KEYWORDS);
+
   // ---------------------------------------------------------------- 06. Query Builder
   const queryDetail = {
     id: NODE.queryGeneration,
-    nodeName: "06. Query Builder (LLM)",
-    input: { legalIssuesCount: caseAnalysis.data.legalIssues.length },
+    nodeName: "06. Query Builder",
+    input: { keywordsRecebidas: keywordsSelecionadas },
   };
-  yield { type: "stage", event: recorder.start("QUERY_GENERATION", "Geração de Queries", queryDetail) };
+  yield { type: "stage", event: recorder.start("QUERY_GENERATION", "Montagem da Query", queryDetail) };
   const tQueries = Date.now();
-  const queryPlan = await guardedExecution.run("generateSearchQueries", () =>
-    generateSearchQueries(caseAnalysis.data, llmProvider, signal),
-  );
-  if (queryPlan.isError) {
-    yield* failStage("QUERY_GENERATION", "Geração de Queries", tQueries, queryPlan.error, queryDetail);
+
+  if (keywordsSelecionadas.length === 0) {
+    const error = missingKeywordsError();
+    yield* failStage("QUERY_GENERATION", "Montagem da Query", tQueries, error, queryDetail);
     return;
   }
+
+  const criterioPesquisa = keywordsSelecionadas
+    .map((keyword) => normalizeTjprKeywordQuery(keyword))
+    .filter(Boolean)
+    .join(" ");
+
   yield {
     type: "stage",
-    event: recorder.record("QUERY_GENERATION", "Geração de Queries", "COMPLETED", tQueries, {
+    event: recorder.record("QUERY_GENERATION", "Montagem da Query", "COMPLETED", tQueries, {
       ...queryDetail,
-      output: { totalQueries: queryPlan.data.queries.length, queries: queryPlan.data.queries },
-      subTasks: llmSubTasks(),
-      logs: [`[INFO] ${queryPlan.data.queries.length} pesquisas jurídicas personalizadas foram criadas.`],
+      output: { keywords: keywordsSelecionadas, query: criterioPesquisa },
+      logs: [`[INFO] Query única montada a partir de ${keywordsSelecionadas.length} palavra(s)-chave.`],
     }),
   };
 
-  const queriesGenerated = await repository.updateRun(runId, {
+  const queryBuilt = await repository.updateRun(runId, {
     stage: "SEARCH",
     status: "QUERIES_GENERATED",
   });
-  if (queriesGenerated.isError) {
-    yield* failRun(queriesGenerated.error);
+  if (queryBuilt.isError) {
+    yield* failRun(queryBuilt.error);
     return;
   }
   currentStage = "SEARCH";
 
-  /**
-   * Termos do usuário viram queries como as outras, com `intent: "RELATED"` — não são a tese dele
-   * nem a contrária, são recortes que ele quer ver cobertos. Ficam amarrados à primeira questão
-   * jurídica identificada porque `legalIssueId` é obrigatório para rastreabilidade (HU-11) e quem
-   * digitou um termo solto não escolheu questão nenhuma.
-   */
-  const questaoPadrao = caseAnalysis.data.legalIssues[0]?.id;
-  const termosDoUsuario: SearchQuery[] = (input.extraTerms ?? [])
-    .map((termo) => termo.trim())
-    .filter((termo, indice, todos) => termo.length > 0 && todos.indexOf(termo) === indice)
-    .filter((termo) => !queryPlan.data.queries.some((existente) => existente.query === termo))
-    .map((termo) => ({
-      query: termo,
-      reason: "Termo informado pelo usuário na tela de envio.",
-      intent: "RELATED" as const,
-      legalIssueId: questaoPadrao ?? "",
-    }))
-    .filter((query) => query.legalIssueId.length > 0);
-
-  const queriesParaBuscar = [...queryPlan.data.queries, ...termosDoUsuario];
-
-  progress.queriesGenerated = queriesParaBuscar.length;
+  progress.keywordsSelected = keywordsSelecionadas.length;
   yield progressEvent();
 
   // ---------------------------------------------------------------- 07. Busca e pré-ranking
   const searchDetail = {
     id: NODE.search,
     nodeName: "07. Busca & Pre-Ranking (TJPR)",
-    input: { totalQueries: queriesParaBuscar.length, termosDoUsuario: termosDoUsuario.length },
+    input: { keywords: keywordsSelecionadas, query: criterioPesquisa },
   };
   yield { type: "stage", event: recorder.start("SEARCH", "Busca Jurisprudencial", searchDetail) };
   const tSearch = Date.now();
-  const foundItems: JurisprudenceSearchItem[] = [];
   const jurisprudenceSources = new Set<string>();
-  /** Buscas que a fixture respondeu no lugar da fonte configurada — ver o `[AVISO]` da etapa. */
+  /** A fixture respondeu no lugar da fonte configurada — ver o `[AVISO]` da etapa. */
   const degradedSources: string[] = [];
-  // Uma sub-tarefa por query: é o que permite abrir no navegador exatamente a mesma URL que o
-  // código consultou e comparar o resultado com o portal, em vez de reconstruí-la à mão.
+
+  const query = { query: criterioPesquisa, filters: filtrosDoUsuario };
+  const searchResult = await guardedExecution.run("searchJurisprudence", () =>
+    jurisprudenceProvider.search(query),
+  );
+
+  // Uma sub-tarefa só, para a mesma URL que o código consultou poder ser comparada com o portal
+  // em vez de reconstruída à mão — o formato de lista sobrevive de quando havia várias queries.
   const searchSubTasks: AgentTaskInfo[] = [];
-  for (const searchQuery of queriesParaBuscar) {
-    if (signal?.aborted) break;
-    // O recorte acompanha TODA query: o funil de HU-13 conta o total por busca, e aplicar em
-    // só algumas daria um total que não corresponde a recorte nenhum.
-    const normalizedQuery = normalizeTjprKeywordQuery(searchQuery.query) || searchQuery.query.trim();
-    const query = { query: normalizedQuery, filters: filtrosDoUsuario };
-    const tQuery = Date.now();
-    const searchResult = await guardedExecution.run("searchJurisprudence", () =>
-      jurisprudenceProvider.search(query),
-    );
-    if (searchResult.isError) {
-      searchSubTasks.push({
-        id: `busca-${searchSubTasks.length + 1}`,
-        name: normalizedQuery,
-        status: "FAILED",
-        durationMs: Date.now() - tQuery,
-        input: {
-          queryOriginal: searchQuery.query,
-          queryEnviada: normalizedQuery,
-          intent: searchQuery.intent,
-          legalIssueId: searchQuery.legalIssueId,
-        },
-        error: { code: searchResult.error.code, description: searchResult.error.description },
-      });
-      yield* failStage("SEARCH", "Busca Jurisprudencial", tSearch, searchResult.error, {
-        ...searchDetail,
-        input: { queryOriginal: searchQuery.query, queryEnviada: normalizedQuery },
-        subTasks: audit ? searchSubTasks : undefined,
-      });
-      return;
-    }
-    const searchProvider = searchResult.metadata?.source ?? sourceProvider.name;
-    jurisprudenceSources.add(searchProvider);
-    // Só acontece no modo `tjpr+fixture`, que é opt-in: o provider primário falhou e a resposta veio
-    // do fallback. Precisa de aviso, não de uma string discreta no rodapé — a fixture nunca devolve
-    // vazio, então uma degradação despercebida entrega um relatório completo sobre acórdãos que não
-    // existem. Comparar com o nome do provider configurado é o que torna o desvio detectável.
-    if (sourceProvider.name !== "fixture" && searchProvider === "fixture" && !degradedSources.includes(normalizedQuery)) {
-      degradedSources.push(normalizedQuery);
-    }
 
+  if (searchResult.isError) {
     searchSubTasks.push({
-      id: `busca-${searchSubTasks.length + 1}`,
-      name: normalizedQuery,
-      status: "COMPLETED",
-      durationMs: Date.now() - tQuery,
-      input: {
-        queryOriginal: searchQuery.query,
-        queryEnviada: normalizedQuery,
-        intent: searchQuery.intent,
-        legalIssueId: searchQuery.legalIssueId,
-        reason: searchQuery.reason,
-        // Vazio na fixture, que não fala HTTP; presente sempre que a fonte for o portal real.
-        url: searchResult.metadata?.url,
-      },
-      output: {
-        provider: searchProvider,
-        // O total que a fonte declarou ter, que não é o que veio: o portal responde por página.
-        totalCount: searchResult.data.totalCount,
-        itemsReturned: searchResult.data.items.length,
-        // Quantas páginas o portal realmente entregou. Ficar em 1 com `SEARCH_MAX_PAGES = 3`
-        // significa que o parâmetro de paginação ainda não está configurado (HU-38).
-        pagesFetched: searchResult.metadata?.pagesFetched,
-        // Quantas palavras do fim de `queryEnviada` o provider descartou até achar algum
-        // resultado — a busca do TJPR é AND estrito e zera sozinha com poucos termos a mais.
-        relaxations: searchResult.metadata?.relaxations,
-        collectedCap: SEARCH_COLLECTED_ITEMS_CAP,
-        items: audit ? searchResult.data.items : undefined,
-      },
+      id: "busca-1",
+      name: criterioPesquisa,
+      status: "FAILED",
+      durationMs: Date.now() - tSearch,
+      input: { keywords: keywordsSelecionadas, queryEnviada: criterioPesquisa },
+      error: { code: searchResult.error.code, description: searchResult.error.description },
     });
-
-    const savedSearch = await repository.saveSearch({
-      searchId: randomUUID(),
-      runId,
-      query,
-      provider: searchProvider,
-      totalCount: searchResult.data.totalCount,
-      items: searchResult.data.items,
-      createdAt: new Date().toISOString(),
+    yield* failStage("SEARCH", "Busca Jurisprudencial", tSearch, searchResult.error, {
+      ...searchDetail,
+      subTasks: audit ? searchSubTasks : undefined,
     });
-    if (savedSearch.isError) {
-      yield* failRun(savedSearch.error);
-      return;
-    }
-
-    foundItems.push(...applySearchFunnel(searchResult.data));
+    return;
   }
 
-  const uniqueItems = dedupeSearchItems(foundItems);
+  const searchProvider = searchResult.metadata?.source ?? sourceProvider.name;
+  jurisprudenceSources.add(searchProvider);
+  // Só acontece no modo `tjpr+fixture`, que é opt-in: o provider primário falhou e a resposta veio
+  // do fallback. Precisa de aviso, não de uma string discreta no rodapé — a fixture nunca devolve
+  // vazio, então uma degradação despercebida entrega um relatório completo sobre acórdãos que não
+  // existem. Comparar com o nome do provider configurado é o que torna o desvio detectável.
+  if (sourceProvider.name !== "fixture" && searchProvider === "fixture") {
+    degradedSources.push(criterioPesquisa);
+  }
+
+  searchSubTasks.push({
+    id: "busca-1",
+    name: criterioPesquisa,
+    status: "COMPLETED",
+    durationMs: Date.now() - tSearch,
+    input: {
+      keywords: keywordsSelecionadas,
+      queryEnviada: criterioPesquisa,
+      // Vazio na fixture, que não fala HTTP; presente sempre que a fonte for o portal real.
+      url: searchResult.metadata?.url,
+    },
+    output: {
+      provider: searchProvider,
+      // O total que a fonte declarou ter, que não é o que veio: o portal responde por página.
+      totalCount: searchResult.data.totalCount,
+      itemsReturned: searchResult.data.items.length,
+      // Quantas páginas o portal realmente entregou. Ficar em 1 com `SEARCH_MAX_PAGES = 3`
+      // significa que o parâmetro de paginação ainda não está configurado (HU-38).
+      pagesFetched: searchResult.metadata?.pagesFetched,
+      // Quantas palavras do fim de `queryEnviada` o provider descartou até achar algum
+      // resultado — a busca do TJPR é AND estrito e zera sozinha com poucos termos a mais.
+      relaxations: searchResult.metadata?.relaxations,
+      collectedCap: SEARCH_COLLECTED_ITEMS_CAP,
+      items: audit ? searchResult.data.items : undefined,
+    },
+  });
+
+  const savedSearch = await repository.saveSearch({
+    searchId: randomUUID(),
+    runId,
+    query,
+    provider: searchProvider,
+    totalCount: searchResult.data.totalCount,
+    items: searchResult.data.items,
+    createdAt: new Date().toISOString(),
+  });
+  if (savedSearch.isError) {
+    yield* failRun(savedSearch.error);
+    return;
+  }
+
+  const uniqueItems = dedupeSearchItems(applySearchFunnel(searchResult.data));
   const ranked = rankCandidates(uniqueItems, buildPreRankingContext(caseAnalysis.data));
   const selected = selectForScratchpad(ranked);
   if (selected.isError) {

@@ -12,7 +12,7 @@ import type { DataVeniaRepository } from "../../persistence/repository";
 import type { JurisprudenceProvider } from "../../providers/jurisprudence-provider";
 import type { JurisprudenceQuery } from "../../schemas/search.schema";
 import type { AuditLevel } from "../../config/audit";
-import { normalizeTjprKeywordQuery } from "../../services/jurisprudence/normalize-query";
+import { MAX_USER_KEYWORDS } from "../../config/limits";
 
 const CASE_ANALYSIS = {
   processNumber: "0009876-54.2025.8.16.0001",
@@ -36,22 +36,8 @@ const CASE_ANALYSIS = {
   evidenceSummary: ["Relatório médico"],
 };
 
-const QUERY_PLAN = {
-  queries: [
-    {
-      query: "plano de saúde negativa de cobertura abusiva",
-      reason: "Busca a tese principal do cliente.",
-      intent: "MAIN_THESIS",
-      legalIssueId: "LI-1",
-    },
-    {
-      query: "plano de saúde negativa de cobertura válida exclusão específica",
-      reason: "Busca jurisprudência contrária à tese.",
-      intent: "CONTRARY",
-      legalIssueId: "LI-1",
-    },
-  ],
-};
+/** Keywords padrão dos testes que não estão exercitando a escolha de keywords em si. */
+const DEFAULT_KEYWORDS = ["plano saude"];
 
 /** Frase real do acórdão da fixture: é o que faz a verificação de citação (HU-24) confirmar. */
 function longestSentence(fullText: string): string {
@@ -160,8 +146,6 @@ function stubLlmProvider(options: StubOptions = {}): LlmProvider {
       switch (params.schemaName) {
         case "CaseAnalysis":
           return parseStructuredOutput(params.schema, params.schemaName, CASE_ANALYSIS, "stub");
-        case "SearchQueryPlan":
-          return parseStructuredOutput(params.schema, params.schemaName, QUERY_PLAN, "stub");
         case "DecisionScratchpadContent": {
           const id = /ID interno da decisão: (\S+)/.exec(params.prompt)?.[1];
           const content = {
@@ -213,6 +197,7 @@ async function collectEvents(
         type: "text/plain",
         bytes: Buffer.from(PETITION, "utf-8"),
       },
+      keywords: DEFAULT_KEYWORDS,
     },
     {
       repository,
@@ -444,9 +429,9 @@ describe("runPipeline", () => {
         .map((event) => [event.event.nodeDetail!.id, event.event.nodeDetail!]),
     );
 
-    // Uma sub-tarefa por query, com o total que a fonte declarou: é o que se compara com o portal.
+    // Uma sub-tarefa só, com o total que a fonte declarou: é o que se compara com o portal.
     const search = byId.get("node-07-search")!.subTasks!;
-    expect(search).toHaveLength(QUERY_PLAN.queries.length);
+    expect(search).toHaveLength(1);
     expect(search[0]!.output).toHaveProperty("totalCount");
 
     const scratchpads = byId.get("node-08-scratchpad-generation")!.subTasks!;
@@ -472,9 +457,9 @@ describe("runPipeline", () => {
     expect(String(input.system)).toContain("assistente jurídico");
     expect(String(input.prompt)).toContain("<documento>");
 
-    // Cada nó leva só as suas: o buffer é drenado a cada etapa, senão o cross-file apareceria
-    // carregando as chamadas de todas as anteriores.
-    expect(byId.get("node-06-query-generation")!.subTasks).toHaveLength(1);
+    // Query Builder não chama modelo nenhum desde 2026-09-13 (a busca vem das keywords que o
+    // usuário escolheu) — o nó não carrega chamada de LLM alguma.
+    expect(byId.get("node-06-query-generation")!.subTasks).toBeUndefined();
   });
 
   it("o texto anterior à sanitização só sai no nível full", async () => {
@@ -507,12 +492,13 @@ describe("runPipeline", () => {
 });
 
 /**
- * Termos e recorte escolhidos pelo usuário na tela de envio.
+ * Keywords e recorte escolhidos pelo usuário na tela de envio.
  *
- * O que está sendo protegido: os termos dele SOMAM às queries do modelo. Se um dia passarem a
- * substituí-las, a busca por jurisprudência contrária de HU-11 some sem ninguém perceber — e o
- * relatório continua afirmando "nenhum precedente contrário identificado na amostra", que passaria
- * a ser verdade sobre a busca, não sobre o acervo.
+ * Decisão de 2026-09-13: não há mais LLM gerando query — o usuário escolhe até
+ * `MAX_USER_KEYWORDS` palavras-chave (sugeridas a partir da peça ou digitadas) e elas viram,
+ * sozinhas, a ÚNICA busca feita no TJPR. O que está sendo protegido aqui: exatamente uma chamada
+ * a `search()`, com a query montada a partir das keywords (dedupe, limite, normalização) e nunca
+ * mais de uma.
  */
 describe("runPipeline — escopo definido pelo usuário", () => {
   function spyProvider(): { provider: JurisprudenceProvider; recebidas: JurisprudenceQuery[] } {
@@ -531,7 +517,7 @@ describe("runPipeline — escopo definido pelo usuário", () => {
   }
 
   async function rodar(input: {
-    extraTerms?: string[];
+    keywords?: string[];
     filters?: JurisprudenceQuery["filters"];
     auditLevel?: AuditLevel;
   }) {
@@ -563,65 +549,66 @@ describe("runPipeline — escopo definido pelo usuário", () => {
     return { events, recebidas };
   }
 
-  it("busca os termos do usuário ALÉM das queries do modelo, nunca no lugar delas", async () => {
-    const { recebidas } = await rodar({ extraTerms: ["reembolso de despesas médicas"] });
+  it("monta uma única query juntando as keywords normalizadas", async () => {
+    const { recebidas } = await rodar({ keywords: ["reembolso", "despesas médicas"] });
 
-    const buscados = recebidas.map((item) => item.query);
-    // As duas do modelo continuam inteiras — inclusive a CONTRARY, que é o ponto.
-    for (const doModelo of QUERY_PLAN.queries) {
-      expect(buscados).toContain(normalizeTjprKeywordQuery(doModelo.query));
-    }
-    expect(buscados).toContain("reembolso despesas medicas");
-    expect(buscados).toHaveLength(QUERY_PLAN.queries.length + 1);
+    expect(recebidas).toHaveLength(1);
+    expect(recebidas[0]!.query).toBe("reembolso despesas medicas");
   });
 
-  it("ignora termo repetido, vazio ou igual ao que o modelo já gerou", async () => {
+  it("ignora keyword repetida ou vazia", async () => {
+    const { recebidas } = await rodar({ keywords: ["  ", "plano saude", "plano saude"] });
+
+    expect(recebidas).toHaveLength(1);
+    expect(recebidas[0]!.query).toBe("plano saude");
+  });
+
+  it(`limita a ${MAX_USER_KEYWORDS} keywords mesmo que mais sejam enviadas`, async () => {
     const { recebidas } = await rodar({
-      extraTerms: ["  ", "novo termo", "novo termo", QUERY_PLAN.queries[0]!.query],
+      keywords: ["um", "dois", "tres", "quatro", "cinco", "seis", "sete"],
     });
 
-    expect(recebidas.map((item) => item.query)).toHaveLength(QUERY_PLAN.queries.length + 1);
+    expect(recebidas).toHaveLength(1);
+    expect(recebidas[0]!.query.split(" ")).toHaveLength(MAX_USER_KEYWORDS);
+    expect(recebidas[0]!.query).toBe("um dois tres quatro cinco");
   });
 
-  it("aplica o recorte em todas as queries, não só em algumas", async () => {
+  it("aplica o recorte na única query", async () => {
     const { recebidas } = await rodar({
-      extraTerms: ["reembolso de despesas médicas"],
+      keywords: ["reembolso"],
       filters: { judgingBody: "9ª Câmara Cível", periodStart: "2020-01-01" },
     });
 
-    expect(recebidas.length).toBeGreaterThan(1);
-    for (const recebida of recebidas) {
-      expect(recebida.filters).toEqual({
-        judgingBody: "9ª Câmara Cível",
-        periodStart: "2020-01-01",
-      });
-    }
+    expect(recebidas).toHaveLength(1);
+    expect(recebidas[0]!.filters).toEqual({
+      judgingBody: "9ª Câmara Cível",
+      periodStart: "2020-01-01",
+    });
   });
 
-  it("sem escopo, busca exatamente o que o modelo gerou", async () => {
-    const { recebidas } = await rodar({});
-    expect(recebidas.map((item) => item.query)).toEqual(
-      QUERY_PLAN.queries.map((q) => normalizeTjprKeywordQuery(q.query)),
+  it("sem nenhuma keyword, falha explicitamente em vez de buscar vazio", async () => {
+    const { events, recebidas } = await rodar({ keywords: [] });
+
+    expect(recebidas).toHaveLength(0);
+    const last = events.at(-1);
+    expect(last?.type).toBe("error");
+    expect((last as Extract<PipelineEvent, { type: "error" }>).error.code).toBe(
+      "MISSING_SEARCH_KEYWORDS",
     );
-    expect(recebidas.every((item) => item.filters === undefined)).toBe(true);
   });
 
-  it("em auditoria registra a query original e a enviada ao TJPR", async () => {
-    const { events } = await rodar({ extraTerms: ["Plano de saúde"], auditLevel: "artifacts" });
+  it("em auditoria registra as keywords e a query enviada ao TJPR", async () => {
+    const { events } = await rodar({ keywords: ["Plano de saúde"], auditLevel: "artifacts" });
     const search = events.find(
       (event) =>
         event.type === "stage" &&
         event.event.nodeDetail?.id === "node-07-search" &&
         event.event.status === "COMPLETED",
     );
-    const subTasks = search?.type === "stage" ? search.event.nodeDetail?.subTasks ?? [] : [];
-    const tarefa = subTasks.find((item) => {
-      const input = item.input as Record<string, unknown> | undefined;
-      return input?.queryOriginal === "Plano de saúde";
-    });
+    const tarefa = (search?.type === "stage" ? search.event.nodeDetail?.subTasks ?? [] : [])[0];
 
     expect(tarefa?.input).toMatchObject({
-      queryOriginal: "Plano de saúde",
+      keywords: ["Plano de saúde"],
       queryEnviada: "plano saude",
     });
   });

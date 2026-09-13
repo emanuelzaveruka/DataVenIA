@@ -4,10 +4,13 @@
  * consome (`POST /api/documents`). Existe porque a orquestração vive em `lib/workflow/run-pipeline.ts`
  * e não na rota: o navegador e este script são só dois consumidores do mesmo fluxo de eventos.
  *
- *   node scripts/watch-run.mjs <arquivo> [--url http://localhost:3000] [--json] [--report] [--out runs]
+ *   node scripts/watch-run.mjs <arquivo> [--url http://localhost:3000] [--keywords a,b,c] [--json] [--report] [--out runs]
  *
  * Requer `npm run dev` rodando e credencial de modelo configurada; a jurisprudência roda em fixture
  * sem configuração nenhuma.
+ *
+ * Sem `--keywords`, busca sugestões em `/api/documents/termos` (sem modelo) e usa as 5 primeiras —
+ * desde 2026-09-13 a análise não roda mais sem ao menos uma palavra-chave selecionada.
  *
  * Com `--out`, grava uma pasta por execução com o que cada etapa produziu. Os artefatos só existem
  * se o **servidor** estiver com `PIPELINE_AUDIT` ligado (`artifacts` ou `full`) — este script não
@@ -24,7 +27,14 @@ const MIME_BY_EXTENSION = {
 };
 
 function parseArgs(argv) {
-  const args = { url: "http://localhost:3000", json: false, report: false, out: undefined, path: undefined };
+  const args = {
+    url: "http://localhost:3000",
+    json: false,
+    report: false,
+    out: undefined,
+    path: undefined,
+    keywords: undefined,
+  };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--url") args.url = argv[++i];
@@ -32,6 +42,10 @@ function parseArgs(argv) {
     else if (arg === "--report") args.report = true;
     // `--out` sem valor é o caso comum ("só quero os arquivos"), então tem default próprio.
     else if (arg === "--out") args.out = argv[i + 1]?.startsWith("-") === false ? argv[++i] : "runs";
+    // Palavras-chave separadas por vírgula ("plano saude,negativa cobertura"). Sem isto o script
+    // busca sugestões em /api/documents/termos e usa as 5 primeiras — desde 2026-09-13 a análise
+    // não roda mais sem nenhuma palavra-chave selecionada.
+    else if (arg === "--keywords") args.keywords = argv[++i]?.split(",").map((k) => k.trim()).filter(Boolean);
     else if (!arg.startsWith("-") && !args.path) args.path = arg;
   }
   return args;
@@ -98,17 +112,44 @@ function progressLine(output) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.path) {
-    console.error("uso: node scripts/watch-run.mjs <arquivo.pdf|docx|txt> [--url <base>] [--json] [--report] [--out <dir>]");
+    console.error("uso: node scripts/watch-run.mjs <arquivo.pdf|docx|txt> [--url <base>] [--keywords a,b,c] [--json] [--report] [--out <dir>]");
     process.exitCode = 2;
     return;
   }
 
   const bytes = await readFile(args.path);
   const name = basename(args.path);
+  const fileType = MIME_BY_EXTENSION[extname(args.path).toLowerCase()] ?? "application/octet-stream";
+
+  let keywords = args.keywords;
+  if (!keywords || keywords.length === 0) {
+    // Desde 2026-09-13 a busca não roda sem palavra-chave nenhuma: sem `--keywords`, usa as
+    // sugestões que `/api/documents/termos` tira da própria peça (sem modelo), como a tela de
+    // envio faz por padrão.
+    const sugestoesForm = new FormData();
+    sugestoesForm.append("file", new File([bytes], name, { type: fileType }));
+    try {
+      const sugestoesResponse = await fetch(`${args.url}/api/documents/termos`, {
+        method: "POST",
+        body: sugestoesForm,
+      });
+      const corpo = await sugestoesResponse.json().catch(() => ({}));
+      keywords = (corpo.terms ?? []).slice(0, 5);
+    } catch {
+      keywords = [];
+    }
+    if (keywords.length > 0) {
+      console.log(`🔑 palavras-chave (sugeridas da peça): ${keywords.join(", ")}`);
+    } else {
+      console.error("✖ não foi possível sugerir palavras-chave da peça — informe com --keywords a,b,c");
+      process.exitCode = 2;
+      return;
+    }
+  }
+
   const form = new FormData();
-  form.append("file", new File([bytes], name, {
-    type: MIME_BY_EXTENSION[extname(args.path).toLowerCase()] ?? "application/octet-stream",
-  }));
+  form.append("file", new File([bytes], name, { type: fileType }));
+  form.append("terms", JSON.stringify(keywords));
 
   const controller = new AbortController();
   process.on("SIGINT", () => {

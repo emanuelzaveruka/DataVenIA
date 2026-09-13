@@ -30,9 +30,9 @@ export type LlmCallSink = (record: LlmCallRecord) => void;
 
 /**
  * Decorator de auditoria sobre um `LlmProvider` (§15). Existe como decorator, e não como
- * instrumentação dentro de cada serviço, porque `case-analysis`, `query-generation`, `scratchpad` e
- * `cross-file` só conhecem a interface — capturar prompt e modelo aqui cobre os quatro de uma vez e
- * mantém a regra de que nenhum serviço sabe quem está do outro lado.
+ * instrumentação dentro de cada serviço, porque `case-analysis`, `scratchpad` e `cross-file` só
+ * conhecem a interface — capturar prompt e modelo aqui cobre os três de uma vez e mantém a regra de
+ * que nenhum serviço sabe quem está do outro lado.
  *
  * Compõe-se **por fora** de `createResilientLlmProvider`: assim o registro enxerga o `metadata.source`
  * da resposta e sabe dizer qual dos dois modelos respondeu, em vez de repetir o nome do primário.

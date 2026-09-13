@@ -40,18 +40,18 @@ export const GLOSSARY = {
       "O arquivo não pôde ser lido. Normalmente é um PDF só de imagem (digitalizado sem texto selecionável), um arquivo corrompido ou um formato fora de PDF/DOCX/TXT.",
   },
   queriesGeradas: {
-    term: "Queries de pesquisa geradas",
+    term: "Palavras-chave selecionadas",
     what:
-      "A partir das questões jurídicas encontradas no seu documento, o sistema monta várias buscas diferentes — nunca uma só. Por exigência do produto, pelo menos uma delas procura jurisprudência CONTRÁRIA à sua tese: você precisa ver o que pode derrubar o argumento, não apenas o que o confirma.",
-    empty: "Nenhuma busca foi montada — o documento não trouxe questão jurídica reconhecível.",
+      "As palavras-chave que você marcou (sugeridas a partir do seu documento) ou digitou na tela de envio, no máximo 5. Elas formam, juntas, a única busca feita no acervo do TJPR — quanto mais palavras, mais restrita a busca fica, então prefira poucas e bem escolhidas.",
+    empty: "Nenhuma palavra-chave foi selecionada — a análise não pôde começar sem ao menos uma.",
     pending: NOT_REACHED,
   },
   candidatosEncontrados: {
     term: "Candidatos encontrados",
     what:
-      "Total de acórdãos do TJPR que as buscas devolveram, já sem repetições. Se uma busca devolver mais de 150 resultados ela é interrompida e o sistema pede filtros, em vez de analisar uma amostra aleatória de um universo grande demais.",
+      "Total de acórdãos do TJPR que a busca devolveu. Se a combinação de palavras-chave não encontrar nada, o sistema tenta de novo removendo a última palavra, até achar algum resultado ou sobrar só uma.",
     empty:
-      "As buscas rodaram e o TJPR não devolveu nenhum acórdão. Costuma indicar tese muito específica ou termos que não aparecem na jurisprudência do tribunal.",
+      "A busca rodou e o TJPR não devolveu nenhum acórdão, mesmo depois de afrouxar as palavras-chave. Costuma indicar tema muito específico ou termos que não aparecem na jurisprudência do tribunal.",
     pending: NOT_REACHED,
   },
   decisoesSelecionadas: {

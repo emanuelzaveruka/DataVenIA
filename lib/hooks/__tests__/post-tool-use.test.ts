@@ -34,7 +34,6 @@ describe("preToolUse (HU-31)", () => {
       parseDocument: "DOCUMENT_ANALYSIS",
       sanitizeDocument: "DOCUMENT_ANALYSIS",
       analyzeCase: "DOCUMENT_ANALYSIS",
-      generateSearchQueries: "QUERY_GENERATION",
       searchJurisprudence: "SEARCH",
       generateScratchpads: "SCRATCHPAD_GENERATION",
       analyzeCrossFile: "CROSS_FILE_ANALYSIS",

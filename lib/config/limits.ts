@@ -32,6 +32,9 @@ export const MIN_PDF_CHARS_PER_PAGE = 100;
  * `totalCount` continua sendo lido para auditoria, mas não decide se a execução segue e não gera
  * aviso ao usuário. O que limita custo é a amostra coletada e selecionada para Scratchpad.
  */
+/** Definido em `limits.client.ts` — reexportado daqui para não duplicar o literal. */
+export { MAX_USER_KEYWORDS } from "./limits.client";
+
 export const SEARCH_PAGE_SIZE = 20;
 export const SEARCH_MAX_PAGES = 3;
 /** Teto de itens coletados por query: `SEARCH_PAGE_SIZE * SEARCH_MAX_PAGES`. */
