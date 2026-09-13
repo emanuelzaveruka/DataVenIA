@@ -121,10 +121,11 @@ export const DIVIDED_CONVERGENCE_MARGIN = 0.15;
  * trunca o JSON no meio e a falha chega como `STRUCTURED_OUTPUT_NOT_JSON` — um erro de forma que
  * parece erro de modelo e consome as três tentativas sem chance de acerto.
  *
- * Mantido folgado porque as listas de decisões da saída são uma por questão jurídica e crescem com
- * o número de Scratchpads; reduzir o tamanho da amostra acelera o MAP sem exigir mexer neste teto.
+ * Mantido no maior valor seguro para os modelos de Chat Completions usados em produção hoje: alguns
+ * aceitam no máximo 16.384 tokens de conclusão e rejeitam a requisição inteira quando recebem
+ * 32.000. Reduzir a amostra acelera o MAP sem exigir mexer neste teto.
  */
-export const CROSS_FILE_MAX_OUTPUT_TOKENS = 32000;
+export const CROSS_FILE_MAX_OUTPUT_TOKENS = 16000;
 
 /**
  * Tempo máximo de **uma** chamada de modelo, do envio ao corpo da resposta.
