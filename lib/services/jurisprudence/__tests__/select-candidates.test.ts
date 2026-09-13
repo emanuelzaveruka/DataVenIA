@@ -25,8 +25,10 @@ describe("selectForScratchpad (HU-16)", () => {
     }
   });
 
-  it("selects at most scratchpadLimit decisions out of 30 ranked candidates", () => {
-    const ranked = Array.from({ length: 30 }, (_, i) => fakeCandidate(`item-${i}`, 30 - i, "1ª Câmara Cível"));
+  it("selects at most scratchpadLimit decisions from a larger ranked set", () => {
+    const ranked = Array.from({ length: SCRATCHPAD_LIMIT + 10 }, (_, i) =>
+      fakeCandidate(`item-${i}`, SCRATCHPAD_LIMIT + 10 - i, "1ª Câmara Cível"),
+    );
 
     const result = selectForScratchpad(ranked);
 

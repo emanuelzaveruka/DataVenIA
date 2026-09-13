@@ -21,28 +21,23 @@ export const MIN_CASE_ANALYSIS_INPUT_CHARS = 200;
  * significava matar o run por causa de um número grande ("plano de saúde", 3.970 em §4.2) e, nas
  * buscas que passavam, analisar só a primeira página sem regra nenhuma sobre quantos itens eram.
  *
- * `totalCount` continua sendo lido e reportado — é o que diz ao usuário que vale refinar por
- * período, Câmara ou relator —, mas não decide mais se a execução segue.
+ * `totalCount` continua sendo lido para auditoria, mas não decide se a execução segue e não gera
+ * aviso ao usuário. O que limita custo é a amostra coletada e selecionada para Scratchpad.
  */
 export const SEARCH_PAGE_SIZE = 20;
 export const SEARCH_MAX_PAGES = 3;
 /** Teto de itens coletados por query: `SEARCH_PAGE_SIZE * SEARCH_MAX_PAGES`. */
 export const SEARCH_COLLECTED_ITEMS_CAP = SEARCH_PAGE_SIZE * SEARCH_MAX_PAGES;
 /**
- * Acima disto a busca é ampla o bastante para valer um aviso de refinamento, mesmo seguindo em
- * frente. É o antigo `RAW_SEARCH_RESULTS_CAP` com o papel que sobrou: sinalizar, não bloquear.
- */
-export const BROAD_SEARCH_WARNING_THRESHOLD = 150;
-/**
  * Teto do pré-ranking. Diferente de `SEARCH_COLLECTED_ITEMS_CAP`, que vale **por query**, este vale
- * sobre o conjunto já deduplicado de todas as queries. Mantido baixo durante os testes locais para
- * encurtar a etapa MAP: cada item que chega aqui vira uma chamada de modelo.
+ * sobre o conjunto já deduplicado de todas as queries. Cada item que chega aqui vira uma chamada de
+ * modelo na etapa MAP, porque `SCRATCHPAD_LIMIT` deriva deste valor.
  *
  * Ordenar não custa nada (é função pura, sem modelo e sem rede), então o corte não existe para
  * economizar: existe para o round-robin por Câmara de HU-16 escolher dentro de um conjunto que
  * ainda é relevante. Quem decide custo é `SCRATCHPAD_LIMIT`.
  */
-export const SEARCH_CANDIDATE_LIMIT = 12;
+export const SEARCH_CANDIDATE_LIMIT = 60;
 /**
  * Quantas decisões são lidas a fundo (uma chamada de modelo cada, etapa MAP).
  *
@@ -78,7 +73,7 @@ function intFromEnv(name: string, fallback: number, bounds: { min: number; max: 
   return value;
 }
 
-export const SCRATCHPAD_CONCURRENCY = intFromEnv("SCRATCHPAD_CONCURRENCY", 8, { min: 1, max: 12 });
+export const SCRATCHPAD_CONCURRENCY = intFromEnv("SCRATCHPAD_CONCURRENCY", 12, { min: 1, max: 12 });
 export const SCRATCHPAD_FETCH_CONCURRENCY = intFromEnv(
   "SCRATCHPAD_FETCH_CONCURRENCY",
   SCRATCHPAD_CONCURRENCY,
@@ -93,9 +88,8 @@ export const SCRATCHPAD_LLM_CONCURRENCY = intFromEnv(
 /**
  * Custo de uma execução na etapa MAP, para não ser surpresa: são `SCRATCHPAD_LIMIT` chamadas de
  * modelo **e** `SCRATCHPAD_LIMIT` requisições de inteiro teor à fonte, em ondas de
- * `SCRATCHPAD_CONCURRENCY`. Com 12 e 8, são até 8 análises de modelo em paralelo; subir a
- * concorrência encurta a parede, mas multiplica a pressão sobre o portal do TJPR e sobre o provider
- * de LLM na mesma proporção, então os knobs de fetch/modelo são separados.
+ * `SCRATCHPAD_CONCURRENCY`. Com 60 e 12, são até 12 análises de modelo em paralelo. Se aparecer
+ * rate limit, reduza `SCRATCHPAD_LLM_CONCURRENCY` sem precisar reduzir a amostra.
  */
 
 /**

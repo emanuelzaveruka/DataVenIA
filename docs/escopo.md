@@ -90,20 +90,22 @@ tornar rastreável — §10 exige decisão explícita, nunca por omissão).
   útil ("plano de saúde", 3.970 resultados em §4.2) matava o run, e as que passavam analisavam só a
   primeira página, sem regra nenhuma sobre quantos itens eram.
   O teto agora é explícito: **60 itens por query** (`SEARCH_COLLECTED_ITEMS_CAP` = 3 páginas de 20)
-  e **12 candidatos** no pré-ranking (`SEARCH_CANDIDATE_LIMIT`), para manter os testes locais
-  rápidos sem aumentar o volume do MAP. `totalCount` continua
-  lido e reportado como aviso de refinamento (`BROAD_SEARCH_WARNING_THRESHOLD`), sem bloquear.
+  e **60 candidatos** no pré-ranking (`SEARCH_CANDIDATE_LIMIT`), para que todo item coletado na
+  amostra possa virar Scratchpad. `totalCount` continua disponível para auditoria, mas não bloqueia
+  e não gera aviso de refinamento.
   O que a HU protegia — nunca processar volume não filtrado — continua valendo; mudou o mecanismo.
-  `SCRATCHPAD_LIMIT` deriva do mesmo teto: até 12 itens selecionados geram até 12 Scratchpads.
+  `SCRATCHPAD_LIMIT` deriva do mesmo teto: até 60 itens selecionados geram até 60 Scratchpads.
   **Decidido para o hackathon, a revisar depois** — em especial o tamanho de página, que hoje é uma
   suposição (20) até a inspeção de HU-38 confirmar.
 
-- **2026-09-13 — busca paginada no TJPR, pronta para ligar.** `lib/providers/tjpr.ts` percorre até
-  `SEARCH_MAX_PAGES`, mas o **nome do parâmetro de página continua desconhecido** e por isso vazio
-  (`DEFAULT_TJPR_PAGINATION.pageParam`): descobri-lo por tentativa e erro contra o portal é o que
-  §9 e HU-38 proíbem. Enquanto estiver vazio, a busca traz uma página só e diz isso em
-  `pagesFetched`. Preencher os dois nomes — no código ou via `TJPR_PAGE_PARAM`/
-  `TJPR_PAGE_SIZE_PARAM` — liga a paginação sem nenhuma outra mudança.
+- **2026-09-13 — busca paginada no TJPR.** `lib/providers/tjpr.ts` percorre até
+  `SEARCH_MAX_PAGES` usando `pageNumber`, parâmetro validado no HTML público do portal: os links de
+  próxima página setam `document.forms['pesquisaForm']['pageNumber'].value='2'`, e `GET
+  /jurisprudencia/publico/pesquisa.do?...&pageNumber=2&sortColumn=processo_sDataJulgamento&sortOrder=DESC`
+  retornou IDs diferentes da página 1 e "exibindo de 51 até 100". O parâmetro `pageSize` aparece
+  como hidden no formulário, mas **não virou default**: `pageSize=20` não fez o portal devolver 20
+  decisões TJPR por página de forma confiável. O limite de custo segue local, por
+  `SEARCH_COLLECTED_ITEMS_CAP`/`SEARCH_CANDIDATE_LIMIT`.
 
 Ver também HU-38 (plano de validação da fonte TJPR) para os limites do que pode ser feito com o
 portal público antes de qualquer decisão de integração real.

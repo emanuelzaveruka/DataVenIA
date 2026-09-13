@@ -90,6 +90,7 @@ describe("TjprProvider", () => {
     const fetchImpl = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(htmlResponse(searchHtml))
+      .mockResolvedValueOnce(htmlResponse(searchHtml))
       .mockResolvedValueOnce(htmlResponse(decisionHtml));
     const provider = createTjprProvider({ baseUrl: "https://portal.tjpr.jus.br", fetchImpl });
 
@@ -110,8 +111,8 @@ describe("TjprProvider", () => {
       expect(result.data.fullText).toContain("Trata-se de dúvida");
     }
 
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(String(fetchImpl.mock.calls[1]?.[0])).not.toContain("jsessionid");
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(String(fetchImpl.mock.calls[2]?.[0])).not.toContain("jsessionid");
   });
 
   it("does not guess /jurisprudencia/j/{id} when the search URL is unknown", async () => {
@@ -167,18 +168,23 @@ describe("TjprProvider — paginação (HU-13/HU-38)", () => {
     itemsCap: 60,
   };
 
-  it("busca só uma página enquanto o parâmetro de paginação for desconhecido", async () => {
-    const fetchImpl = vi.fn<typeof fetch>(async () => htmlResponse(pageHtml(["1", "2"])));
+  it("usa pageNumber por padrão, parâmetro observado no navegador do TJPR", async () => {
+    const pages = [pageHtml(["1", "2"]), pageHtml(["3", "4"]), pageHtml(["5", "6"])];
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const page = Number(new URL(String(input)).searchParams.get("pageNumber"));
+      return htmlResponse(pages[page - 1]!);
+    });
     const provider = createTjprProvider({ baseUrl: "https://portal.tjpr.jus.br", fetchImpl });
 
     const result = await provider.search({ query: "plano de saude" });
 
-    // Sem o nome do parâmetro (HU-38 pendente), pedir a página 2 devolveria a 1 de novo — e o
-    // pipeline acharia que coletou três páginas tendo coletado a mesma três vezes.
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(new URL(String(fetchImpl.mock.calls[0]![0])).searchParams.get("pageNumber")).toBe("1");
+    expect(new URL(String(fetchImpl.mock.calls[1]![0])).searchParams.get("pageNumber")).toBe("2");
     expect(result.isError).toBe(false);
     if (result.isError) return;
-    expect(result.metadata?.pagesFetched).toBe(1);
+    expect(result.data.items.map((item) => item.id)).toEqual(["1", "2", "3", "4", "5", "6"]);
+    expect(result.metadata?.pagesFetched).toBe(3);
   });
 
   it("com o parâmetro configurado, percorre as páginas e junta os resultados", async () => {

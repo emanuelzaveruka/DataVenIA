@@ -32,7 +32,6 @@ import {
 import { createGuardedExecution } from "../hooks/guarded-execution";
 import { PIPELINE_VERSION, scratchpadVersions } from "../config/versions";
 import {
-  BROAD_SEARCH_WARNING_THRESHOLD,
   MIN_VALID_SCRATCHPADS,
   SCRATCHPAD_LIMIT,
   SEARCH_CANDIDATE_LIMIT,
@@ -678,8 +677,6 @@ async function* pipelineEvents(
   // Uma sub-tarefa por query: é o que permite abrir no navegador exatamente a mesma URL que o
   // código consultou e comparar o resultado com o portal, em vez de reconstruí-la à mão.
   const searchSubTasks: AgentTaskInfo[] = [];
-  /** Queries amplas o bastante para valer um aviso de refinamento — nenhuma delas impede o run. */
-  const broadQueries: string[] = [];
   for (const searchQuery of queriesParaBuscar) {
     if (signal?.aborted) break;
     // O recorte acompanha TODA query: o funil de HU-13 conta o total por busca, e aplicar em
@@ -744,7 +741,6 @@ async function* pipelineEvents(
         // significa que o parâmetro de paginação ainda não está configurado (HU-38).
         pagesFetched: searchResult.metadata?.pagesFetched,
         collectedCap: SEARCH_COLLECTED_ITEMS_CAP,
-        broad: searchResult.data.totalCount > BROAD_SEARCH_WARNING_THRESHOLD,
         items: audit ? searchResult.data.items : undefined,
       },
     });
@@ -763,11 +759,7 @@ async function* pipelineEvents(
       return;
     }
 
-    const funneled = applySearchFunnel(searchResult.data);
-    foundItems.push(...funneled.items);
-    // Busca ampla demais não derruba mais a execução (decisão de 2026-09-13, `docs/escopo.md`):
-    // vira aviso, para o usuário saber que vale refinar por período, Câmara ou relator.
-    if (funneled.broad) broadQueries.push(normalizedQuery);
+    foundItems.push(...applySearchFunnel(searchResult.data));
   }
 
   const uniqueItems = dedupeSearchItems(foundItems);
@@ -792,7 +784,6 @@ async function* pipelineEvents(
           rankedCap: SEARCH_CANDIDATE_LIMIT,
           scratchpadCap: SCRATCHPAD_LIMIT,
           collectedCap: SEARCH_COLLECTED_ITEMS_CAP,
-          broadQueries,
           // O score e sua composição por critério: é o que explica por que um acórdão entrou e
           // outro ficou de fora, sem reabrir `pre-rank.ts`.
           ranked: ranked.map((candidate) => ({
@@ -810,9 +801,6 @@ async function* pipelineEvents(
       subTasks: audit ? searchSubTasks : undefined,
       logs: [
         `[INFO] ${uniqueItems.length} acórdãos encontrados; top ${selected.data.length} selecionados.`,
-        ...(broadQueries.length > 0
-          ? [`[AVISO] ${broadQueries.length} busca(s) muito ampla(s); refine por período, Câmara ou relator.`]
-          : []),
         ...(degradedSources.length > 0
           ? [
               `[AVISO] A fonte configurada (${sourceProvider.name}) falhou em ${degradedSources.length} busca(s) e a fixture respondeu no lugar. Decisões de fixture são fictícias: não serão exibidas como fonte.`,

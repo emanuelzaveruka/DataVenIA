@@ -16,16 +16,11 @@ const PROCESS_NUMBER_PATTERN = /\d{7}-\d{2}\.\d{4}\.\d{1}\.\d{2}\.\d{4}/;
 /**
  * Como pedir a página seguinte ao portal.
  *
- * **`pageParam` está vazio de propósito.** O nome do parâmetro de paginação do
- * `pesquisa.do` não é conhecido pelo código: `docs/tjpr-portal-validacao.md` lista exatamente isto
- * como pendente de inspeção manual no DevTools (HU-38), e §9/`docs/escopo.md` proíbem descobri-lo
- * por tentativa e erro contra o portal. Chutar seria pior do que não paginar: um parâmetro
- * desconhecido é ignorado pelo servidor, que devolve a página 1 de novo — e o pipeline acharia que
- * coletou três páginas quando coletou a mesma três vezes.
- *
- * Enquanto estiver vazio, `search()` busca só a primeira página e diz isso em `pagesFetched`.
- * Para ligar a paginação basta preencher os dois nomes — aqui ou, para testar sem recompilar,
- * pelas variáveis `TJPR_PAGE_PARAM` e `TJPR_PAGE_SIZE_PARAM`.
+ * O parâmetro de página foi validado contra o HTML público do portal em 2026-09-13: o navegador
+ * seta `pageNumber=2` nos links de "Próxima Página", e a mesma chave funciona via GET direto sem
+ * sessão especial. O parâmetro `pageSize` também aparece no formulário, mas não foi promovido a
+ * default porque `pageSize=20` não fez o portal exibir 20 decisões do TJPR por página de forma
+ * confiável; até nova validação, limitamos pelo teto local (`itemsCap`) em vez de depender dele.
  */
 export interface TjprPaginationConfig {
   /** Nome do parâmetro de página (ex.: `pagina`, `pageNumber`, `numPagina` — a confirmar). */
@@ -41,7 +36,7 @@ export interface TjprPaginationConfig {
 }
 
 export const DEFAULT_TJPR_PAGINATION: TjprPaginationConfig = {
-  pageParam: undefined,
+  pageParam: "pageNumber",
   pageSizeParam: undefined,
   firstPageIndex: 1,
   pageSize: SEARCH_PAGE_SIZE,

@@ -6,9 +6,9 @@ primária sem ressalvas. Até a validação operacional completa, o provider TJP
 
 > **Status: validação técnica ampliada em 2026-09-13.** A busca GET pública é reprodutível, e a URL
 > canônica de decisão retornada no resultado foi **medida contra o portal**: responde HTTP 200 e
-> entrega os campos que o parser lê. Continuam pendentes de inspeção manual apenas os itens que só
-> um navegador resolve: termos de uso, rate limit, o parâmetro de paginação e o significado dos
-> valores de `idsTipoDecisaoSelecionados`.
+> entrega os campos que o parser lê. O parâmetro de página também foi validado: `pageNumber`.
+> Continuam pendentes de inspeção manual apenas os itens que só um navegador resolve: termos de uso,
+> rate limit, tamanho de página efetivo e o significado dos valores de `idsTipoDecisaoSelecionados`.
 
 ## Tentativa automatizada (registro da investigação)
 
@@ -75,9 +75,13 @@ Faça em um navegador comum, logado em nada, sem extensão de automação.
 - Busca: `GET /jurisprudencia/publico/pesquisa.do` com os parâmetros:
   `actionType=pesquisar`, `criterioPesquisa=<termo>`, `ambito=7`, `idLocalPesquisa=1`,
   `idsTipoDecisaoSelecionados=3`, `segredoJustica=pesquisar com`.
-- Paginação e tamanho de página: a resposta validada retornou a primeira página, com texto de
-  navegação indicando `62 registro(s) encontrado(s), exibindo de 1 até 50`. O parâmetro exato de
-  próxima página ainda não foi validado.
+- Paginação e tamanho de página: o parâmetro de próxima página é `pageNumber`. Evidência de
+  2026-09-13: o HTML da busca contém links como
+  `document.forms['pesquisaForm']['pageNumber'].value='2'`, e a chamada pública via GET com
+  `pageNumber=2&sortColumn=processo_sDataJulgamento&sortOrder=DESC` retornou IDs diferentes da
+  página 1, com navegação indicando `exibindo de 51 até 100`. O formulário também traz
+  `pageSize=50`, mas `pageSize=20` não fez a página exibir 20 decisões TJPR de forma confiável; por
+  isso o provider não usa `pageSize` por default e limita a amostra no código.
 - Filtros (período, órgão julgador, relator) — parâmetros correspondentes: nomes iniciais inferidos
   dos campos do formulário (`dataJulgamentoInicio`, `dataJulgamentoFim`, `nomeOrgaoJulgador`,
   `nomeRelator`), ainda pendentes de validação com busca filtrada real.
@@ -103,6 +107,9 @@ Faça em um navegador comum, logado em nada, sem extensão de automação.
     **62** registros com `3` (todos classificados "Dúvida/exame de competência"), **182** com `2`,
     **243** sem o parâmetro. O código passou a não enviá-lo por padrão (`TJPR_TIPO_DECISAO`).
     **Pergunta que sobra para a inspeção manual: qual valor significa "Acórdão".**
+  - `https://portal.tjpr.jus.br/jurisprudencia/promo/nenhum-registro/dados-estaticos.html?updateIdx=31`
+    responde HTTP 200, mas é uma tabela estática de precedentes interamericanos/promocionais e não
+    revelou parâmetros de paginação da busca jurisprudencial.
 - Sessão / cookies / CSRF / rate limit observado: a resposta define `JSESSIONID`, mas a busca e a
   decisão abriram sem login, CAPTCHA ou token CSRF na validação inicial. Rate limit não validado.
 - Termos de uso — restrição a reuso automatizado: pendente de validação manual.

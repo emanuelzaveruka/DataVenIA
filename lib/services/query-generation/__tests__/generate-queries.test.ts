@@ -61,12 +61,13 @@ describe("generateSearchQueries", () => {
     await generateSearchQueries(caseAnalysis, provider);
 
     const params = vi.mocked(provider.generateStructured).mock.calls[0]![0];
+    expect(params.system).toContain("exatamente 2 queries");
     expect(params.system).toContain("formato keyword");
     expect(params.system).toContain("plano saude");
     expect(params.prompt).toContain("keywords curtas");
   });
 
-  it("rejects an empty query set", async () => {
+  it("rejects a query set that does not contain exactly two queries", async () => {
     const provider = fakeProviderFromRawResponses([{ queries: [] }, { queries: [] }, { queries: [] }]);
 
     const result = await generateSearchQueries(caseAnalysis, provider);
@@ -75,6 +76,51 @@ describe("generateSearchQueries", () => {
     if (result.isError) {
       expect(result.error.category).toBe("STRUCTURED_OUTPUT");
     }
+  });
+
+  it("rejects extra related query variations to keep the TJPR search small", async () => {
+    const provider = fakeProviderFromRawResponses([
+      {
+        queries: [
+          { query: "dano moral negativação", reason: "Busca pela tese principal.", intent: "MAIN_THESIS", legalIssueId: "issue-1" },
+          { query: "mero aborrecimento consumidor", reason: "Busca por decisões contrárias.", intent: "CONTRARY", legalIssueId: "issue-1" },
+          { query: "serasa inscrição indevida", reason: "Variação correlata.", intent: "MAIN_THESIS", legalIssueId: "issue-1" },
+        ],
+      },
+      {
+        queries: [
+          { query: "dano moral negativação", reason: "Busca pela tese principal.", intent: "MAIN_THESIS", legalIssueId: "issue-1" },
+          { query: "mero aborrecimento consumidor", reason: "Busca por decisões contrárias.", intent: "CONTRARY", legalIssueId: "issue-1" },
+        ],
+      },
+    ]);
+
+    const result = await generateSearchQueries(caseAnalysis, provider);
+
+    expect(result.isError).toBe(false);
+    expect(provider.generateStructured).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries when the model returns RELATED because user extraTerms are added outside this step", async () => {
+    const provider = fakeProviderFromRawResponses([
+      {
+        queries: [
+          { query: "dano moral negativação", reason: "Busca pela tese principal.", intent: "MAIN_THESIS", legalIssueId: "issue-1" },
+          { query: "serasa inscrição indevida", reason: "Termo correlato.", intent: "RELATED", legalIssueId: "issue-1" },
+        ],
+      },
+      {
+        queries: [
+          { query: "dano moral negativação", reason: "Busca pela tese principal.", intent: "MAIN_THESIS", legalIssueId: "issue-1" },
+          { query: "mero aborrecimento consumidor", reason: "Busca por decisões contrárias.", intent: "CONTRARY", legalIssueId: "issue-1" },
+        ],
+      },
+    ]);
+
+    const result = await generateSearchQueries(caseAnalysis, provider);
+
+    expect(result.isError).toBe(false);
+    expect(provider.generateStructured).toHaveBeenCalledTimes(2);
   });
 
   it("retries with feedback and succeeds when the first attempt lacks a CONTRARY query", async () => {
