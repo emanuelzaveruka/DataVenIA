@@ -47,13 +47,19 @@ export const SEARCH_COLLECTED_ITEMS_CAP = SEARCH_PAGE_SIZE * SEARCH_MAX_PAGES;
  * Ordenar não custa nada (é função pura, sem modelo e sem rede), então o corte não existe para
  * economizar: existe para o round-robin por Câmara de HU-16 escolher dentro de um conjunto que
  * ainda é relevante. Quem decide custo é `SCRATCHPAD_LIMIT`.
+ *
+ * **Decisão de 2026-09-13, revertida no mesmo dia**: tinha ido de 12 para 60, mas 60 Scratchpads
+ * MAP + o REDUCE que concatena todos eles numa chamada só estourou TPM (tokens por minuto) da conta
+ * OpenAI em produção (`rate_limit_exceeded` na etapa de análise cruzada, com o MAP já tendo
+ * consumido quase todo o orçamento do minuto). Voltou para 20: mais rápido e não estoura o limite
+ * do modelo, ao custo de uma amostra menor.
  */
-export const SEARCH_CANDIDATE_LIMIT = 60;
+export const SEARCH_CANDIDATE_LIMIT = 20;
 /**
  * Quantas decisões são lidas a fundo (uma chamada de modelo cada, etapa MAP).
  *
- * **Decisão de 2026-09-13 (`docs/escopo.md`)**: é o mesmo número do pré-ranking, de propósito —
- * tudo que sobreviveu à ordenação é analisado, sem um segundo corte no meio do caminho.
+ * É o mesmo número do pré-ranking, de propósito — tudo que sobreviveu à ordenação é analisado, sem
+ * um segundo corte no meio do caminho.
  *
  * Derivado de `SEARCH_CANDIDATE_LIMIT` em vez de repetir o literal: são conceitualmente o mesmo
  * conjunto, e vê-los divergir por edição de um só foi exatamente o que motivou a mudança.

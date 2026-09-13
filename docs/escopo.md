@@ -89,14 +89,20 @@ tornar rastreável — §10 exige decisão explícita, nunca por omissão).
   o que entra na análise são os `items` que a busca trouxe. Na prática, qualquer busca jurídica
   útil ("plano de saúde", 3.970 resultados em §4.2) matava o run, e as que passavam analisavam só a
   primeira página, sem regra nenhuma sobre quantos itens eram.
-  O teto agora é explícito: **60 itens por query** (`SEARCH_COLLECTED_ITEMS_CAP` = 3 páginas de 20)
-  e **60 candidatos** no pré-ranking (`SEARCH_CANDIDATE_LIMIT`), para que todo item coletado na
-  amostra possa virar Scratchpad. `totalCount` continua disponível para auditoria, mas não bloqueia
-  e não gera aviso de refinamento.
+  O teto agora é explícito: **60 itens coletados por query** (`SEARCH_COLLECTED_ITEMS_CAP` = 3
+  páginas de 20) e **20 candidatos** no pré-ranking (`SEARCH_CANDIDATE_LIMIT`) — nem todo item
+  coletado vira Scratchpad, só os 20 mais bem pontuados. `totalCount` continua disponível para
+  auditoria, mas não bloqueia e não gera aviso de refinamento.
   O que a HU protegia — nunca processar volume não filtrado — continua valendo; mudou o mecanismo.
-  `SCRATCHPAD_LIMIT` deriva do mesmo teto: até 60 itens selecionados geram até 60 Scratchpads.
+  `SCRATCHPAD_LIMIT` deriva do mesmo teto: até 20 itens selecionados geram até 20 Scratchpads.
   **Decidido para o hackathon, a revisar depois** — em especial o tamanho de página, que hoje é uma
   suposição (20) até a inspeção de HU-38 confirmar.
+  **Revisão de 2026-09-13, ainda no mesmo dia**: `SEARCH_CANDIDATE_LIMIT`/`SCRATCHPAD_LIMIT` chegaram
+  a subir para 60, mas 60 chamadas de MAP seguidas do REDUCE (que concatena todos os Scratchpads
+  numa única chamada) estourou o limite de tokens por minuto (TPM) da conta OpenAI em produção —
+  `rate_limit_exceeded` bem na etapa de análise cruzada, com o MAP já tendo consumido quase todo o
+  orçamento do minuto. Voltou para 20 no mesmo dia: execução mais rápida e sem estourar limite de
+  provedor, ao custo de uma amostra menor.
 
 - **2026-09-13 — busca paginada no TJPR.** `lib/providers/tjpr.ts` percorre até
   `SEARCH_MAX_PAGES` usando `pageNumber`, parâmetro validado no HTML público do portal: os links de
