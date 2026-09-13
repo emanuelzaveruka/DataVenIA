@@ -9,18 +9,20 @@ import { cn } from "../ui/cn";
  * Navegação única do produto.
  *
  * A barra do protótipo (`.proto-bar`) era um seletor de telas para demonstração, não navegação
- * real — aqui ela vira o menu de verdade, com as rotas do App Router. "Landing" fica ao lado de
- * "Envio" por decisão do usuário (13/09/2026): a apresentação do produto é uma aba como as outras,
- * não uma porta de entrada separada.
+ * real — aqui ela vira o menu de verdade, com as rotas do App Router.
+ *
+ * Ordem por decisão do usuário (13/09/2026): o trabalho vem primeiro (Envio) e a apresentação do
+ * produto vai para o fim, renomeada de "Landing" para "Sobre". Ela continua sendo a rota "/", então
+ * quem chega pela raiz cai na apresentação e a logo sempre volta para lá.
  *
  * Fica sobre navy porque o cabeçalho institucional das telas de Landing e Relatório é navy e os
  * dois precisam emendar sem costura visível.
  */
 const ABAS = [
-  { href: "/", rotulo: "Landing" },
   { href: "/envio", rotulo: "Envio" },
   { href: "/historico", rotulo: "Histórico" },
   { href: "/relatorio", rotulo: "Relatório" },
+  { href: "/", rotulo: "Sobre" },
 ] as const;
 
 export function SiteHeader() {
