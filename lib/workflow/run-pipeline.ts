@@ -780,7 +780,15 @@ async function* pipelineEvents(
     event: recorder.record("SEARCH", "Busca Jurisprudencial", "COMPLETED", tSearch, {
       ...searchDetail,
       output: auditOutput(
-        { totalFound: uniqueItems.length, selectedCount: selected.data.length },
+        {
+          totalFound: uniqueItems.length,
+          selectedCount: selected.data.length,
+          // O que o TJPR declara ter no acervo para esta query — quase sempre bem maior que
+          // `totalFound`, porque a coleta para no teto (`SEARCH_COLLECTED_ITEMS_CAP`). Sempre
+          // visível, mesmo fora do modo auditoria: sem isto, "60 encontrados" parece o universo
+          // inteiro em vez de uma amostra de um acervo de centenas de milhares.
+          declaradoPeloTjpr: searchResult.data.totalCount,
+        },
         () => ({
           rankedCap: SEARCH_CANDIDATE_LIMIT,
           scratchpadCap: SCRATCHPAD_LIMIT,
@@ -801,7 +809,7 @@ async function* pipelineEvents(
       ),
       subTasks: audit ? searchSubTasks : undefined,
       logs: [
-        `[INFO] ${uniqueItems.length} acórdãos encontrados; top ${selected.data.length} selecionados.`,
+        `[INFO] ${uniqueItems.length} acórdãos coletados (de ${searchResult.data.totalCount.toLocaleString("pt-BR")} declarados pelo TJPR para esta busca); top ${selected.data.length} selecionados.`,
         ...(degradedSources.length > 0
           ? [
               `[AVISO] A fonte configurada (${sourceProvider.name}) falhou em ${degradedSources.length} busca(s) e a fixture respondeu no lugar. Decisões de fixture são fictícias: não serão exibidas como fonte.`,

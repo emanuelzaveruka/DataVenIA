@@ -49,7 +49,7 @@ export const GLOSSARY = {
   candidatosEncontrados: {
     term: "Candidatos encontrados",
     what:
-      "Total de acórdãos do TJPR que a busca devolveu. Se a combinação de palavras-chave não encontrar nada, o sistema tenta de novo removendo a última palavra, até achar algum resultado ou sobrar só uma.",
+      "Quantos acórdãos o sistema efetivamente coletou para analisar — não o total que existe no TJPR para aquele termo, que costuma ser muito maior (um termo genérico como \"danos morais\" pode ter centenas de milhares de decisões). A coleta para num teto fixo por desenho, para manter a análise viável; o número que o TJPR declarou para a busca aparece ao lado, para deixar claro que é uma amostra. Se a combinação de palavras-chave não encontrar nada, o sistema tenta de novo removendo a última palavra, até achar algum resultado ou sobrar só uma.",
     empty:
       "A busca rodou e o TJPR não devolveu nenhum acórdão, mesmo depois de afrouxar as palavras-chave. Costuma indicar tema muito específico ou termos que não aparecem na jurisprudência do tribunal.",
     pending: NOT_REACHED,
