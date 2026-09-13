@@ -21,7 +21,6 @@ const ABAS = [
   { href: "/envio", rotulo: "Envio" },
   { href: "/historico", rotulo: "Histórico" },
   { href: "/relatorio", rotulo: "Relatório" },
-  { href: "/design-system", rotulo: "Design system" },
 ] as const;
 
 export function SiteHeader() {
