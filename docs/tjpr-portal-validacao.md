@@ -4,11 +4,10 @@ Pré-requisito obrigatório antes de promover `lib/providers/tjpr.ts` (§9/§14)
 primária sem ressalvas. Até a validação operacional completa, o provider TJPR fica opt-in por
 `.env` e com fallback explícito para fixture (`lib/providers/fixture.ts`, HU-37).
 
-> **Status: validação técnica ampliada em 2026-09-13.** A busca GET pública é reprodutível, e a URL
-> canônica de decisão retornada no resultado foi **medida contra o portal**: responde HTTP 200 e
-> entrega os campos que o parser lê. Continuam pendentes de inspeção manual apenas os itens que só
-> um navegador resolve: termos de uso, rate limit, o parâmetro de paginação e o significado dos
-> valores de `idsTipoDecisaoSelecionados`.
+> **Status: validação técnica inicial realizada em 2026-09-12.** A collection Postman fornecida
+> confirmou uma busca GET pública reprodutível e páginas de decisão com inteiro teor via URL
+> completa retornada no resultado. Ainda falta validar termos de uso e limites operacionais antes
+> de tratar a integração como definitiva.
 
 ## Tentativa automatizada (registro da investigação)
 
@@ -68,24 +67,6 @@ Faça em um navegador comum, logado em nada, sem extensão de automação.
    em `lib/providers/fixtures/`, conferindo antes que não há dado pessoal de parte.
 9. **Preencher as duas seções abaixo** e atualizar o Status no topo.
 
-## O que o código já está esperando desta inspeção
-
-Duas informações do item 4 destravam a paginação imediatamente, sem mais nenhuma mudança de código
-(`lib/providers/tjpr.ts`, `DEFAULT_TJPR_PAGINATION`):
-
-| O que anotar no DevTools | Onde entra | Hoje |
-|---|---|---|
-| nome do parâmetro de página | `pageParam` / `TJPR_PAGE_PARAM` | vazio — a busca traz 1 página só |
-| nome do parâmetro de tamanho de página | `pageSizeParam` / `TJPR_PAGE_SIZE_PARAM` | vazio |
-| a primeira página é `0` ou `1`? | `firstPageIndex` / `TJPR_FIRST_PAGE_INDEX` | assume `1` |
-| quantos itens vêm por página por padrão | `SEARCH_PAGE_SIZE` em `lib/config/limits.ts` | assume `20` |
-
-Para testar um achado sem recompilar, basta exportar as variáveis e rodar com
-`JURISPRUDENCE_PROVIDER=tjpr PIPELINE_AUDIT=artifacts`: o campo `pagesFetched` de cada busca em
-`07-busca/` diz se o portal aceitou o parâmetro. Continuar em `pagesFetched: 1` com
-`SEARCH_MAX_PAGES = 3` significa que o nome está errado — o código detecta que a página seguinte
-não trouxe nada novo e para, em vez de contar a mesma página três vezes.
-
 ## Achados
 
 - Data da inspeção: 2026-09-12.
@@ -106,21 +87,6 @@ não trouxe nada novo e para, em vez de contar a mesma página três vezes.
 - Página da decisão: a URL estável é a URL completa retornada na busca, por exemplo
   `/jurisprudencia/j/4100000032734133/Dúvida/exame de competência-0018288-78.2024.8.16.0019`.
   O atalho `/jurisprudencia/j/4100000032734133` retornou HTTP 404 e não deve ser usado.
-- **Medições de 2026-09-13** (curl direto, termo de controle `plano de saude`):
-  - a URL canônica **percent-encoded** que `lib/providers/tjpr.ts` monta
-    (`…/j/4100000032734133/D%C3%BAvida/exame%20de%20compet%C3%AAncia-0018288-78.2024.8.16.0019`)
-    responde **HTTP 200** e a página contém `ementaRef{id}`, `ementa{id}` e `texto{id}`, além da
-    provenance completa (`1ª Vice-Presidência … Rel.: … J. 16.05.2025`). O charset é UTF-8 pelo
-    header, e é o header que o código usa — não há problema de encoding no caminho.
-  - `https://portal.tjpr.jus.br/jurisprudencia/publico/` responde **HTTP 404**. Era a base das URLs
-    da fixture, que por isso apontavam para página inexistente.
-  - busca pelo número do processo (`criterioPesquisa=0018288-78.2024.8.16.0019`) responde HTTP 200
-    com **0 registros** — não existe atalho "URL direta pelo número do processo"; o href canônico da
-    linha de resultado é o único link estável por decisão.
-  - `idsTipoDecisaoSelecionados` é filtro real e o valor `3` que estava fixo no código era o errado:
-    **62** registros com `3` (todos classificados "Dúvida/exame de competência"), **182** com `2`,
-    **243** sem o parâmetro. O código passou a não enviá-lo por padrão (`TJPR_TIPO_DECISAO`).
-    **Pergunta que sobra para a inspeção manual: qual valor significa "Acórdão".**
 - Sessão / cookies / CSRF / rate limit observado: a resposta define `JSESSIONID`, mas a busca e a
   decisão abriram sem login, CAPTCHA ou token CSRF na validação inicial. Rate limit não validado.
 - Termos de uso — restrição a reuso automatizado: pendente de validação manual.
@@ -167,32 +133,20 @@ Por padrão, o produto opera em modo fixture e isso **não** é um estado degrad
   conectividade externa" — é satisfeito por construção, e a suíte de testes roda sem rede;
 - `lib/providers/fixture.ts` + `lib/providers/fixtures/tjpr-demo-case.ts` (HU-37) entregam 9
   decisões fictícias em 2 Câmaras, suficientes para o pipeline completo (Fases 3–8) rodar de ponta
-  a ponta — é o que `app/relatorio-demo/` demonstra.
+  a ponta — é o que `app/relatorio-demo/` demonstra;
+- todo dado exibido pela demo é **fictício**, e a UI precisa continuar dizendo isso: HU-12 exige
+  que a origem fixture nunca seja silenciosa (`metadata.source`).
 
-**O que mudou em 2026-09-13:** a decisão fictícia deixou de ser exibível como fonte. As URLs da
-fixture saíram do domínio `portal.tjpr.jus.br` (onde apontavam para uma página 404 e, mesmo assim,
-passavam na allowlist e viravam link "Abrir decisão no portal do TJPR") para
-`fixture.datavenia.invalid`. A regra do produto é uma só: **só se exibe a fonte quando existe o
-metadado real de onde a informação saiu.** Na prática, a demo passou a rodar o pipeline inteiro e
-registrar cada achado em `report.omissions`, em vez de apresentar acórdão inventado com link morto.
-
-Os três modos de `JURISPRUDENCE_PROVIDER`:
-
-| Valor | O que faz |
-|---|---|
-| `fixture` (padrão) | demonstração offline; nenhum achado vira fonte exibida |
-| `tjpr` | só o portal real; **falha do TJPR é falha da execução** |
-| `tjpr+fixture` | a degradação de HU-12/HU-14, opt-in, com `[AVISO]` explícito na etapa de busca |
+Para teste real controlado, defina `JURISPRUDENCE_PROVIDER=tjpr`. Nesse modo, o TJPR é primário e
+a fixture permanece como fallback visível em `metadata.source`.
 
 ## Composição em runtime
 
-`lib/providers/get-jurisprudence-provider.ts` é o único ponto de seleção. Em `tjpr`, o provider real
-é entregue direto, sem fallback — a composição resiliente só existe em `tjpr+fixture`:
+`lib/providers/get-jurisprudence-provider.ts` é o único ponto de seleção. A composição correta
+tem três camadas, nesta ordem de dentro para fora:
 
 ```ts
-const source = createTjprProvider();                                        // JURISPRUDENCE_PROVIDER=tjpr
-
-const source = createResilientJurisprudenceProvider(                        // JURISPRUDENCE_PROVIDER=tjpr+fixture
+const source = createResilientJurisprudenceProvider(
   createTjprProvider(),      // primário (Fase 9)
   createFixtureProvider(),   // fallback de HU-12/HU-37
   createCircuitBreaker(),    // HU-14
@@ -200,10 +154,6 @@ const source = createResilientJurisprudenceProvider(                        // J
 
 const provider = createCachedJurisprudenceProvider(source, getRepository()); // §11.8/HU-33
 ```
-
-`tjpr` deixou de degradar para fixture contra a letra de HU-12, por decisão de produto e por um
-motivo medido: `createFixtureProvider().search` nunca devolve vazio, então a degradação não
-produzia resultado pobre — produzia relatório inteiro e plausível sobre 9 acórdãos que não existem.
 
 Duas regras que só apareceram nas fases posteriores e que a composição precisa respeitar:
 

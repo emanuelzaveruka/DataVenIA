@@ -13,47 +13,10 @@ export const MIN_CASE_ANALYSIS_INPUT_CHARS = 200;
 /**
  * Funil de limites da busca de jurisprudência (HU-13/HU-15/HU-16, contexto-geral.md §6).
  * Centralizado aqui — nunca hardcoded em mais de um lugar do pipeline (validação de HU-13).
- *
- * **Decisão de 2026-09-13 (registrada em `docs/escopo.md`)**: o teto passou a valer sobre o que a
- * busca *coleta*, e não sobre quantos resultados *existem* no tribunal. A regra anterior
- * comparava `totalCount` com 150 e derrubava a execução inteira — mas `totalCount` é um número que
- * o pipeline nunca usou: o que entra na análise são os `items` de uma página. Na prática isso
- * significava matar o run por causa de um número grande ("plano de saúde", 3.970 em §4.2) e, nas
- * buscas que passavam, analisar só a primeira página sem regra nenhuma sobre quantos itens eram.
- *
- * `totalCount` continua sendo lido e reportado — é o que diz ao usuário que vale refinar por
- * período, Câmara ou relator —, mas não decide mais se a execução segue.
  */
-export const SEARCH_PAGE_SIZE = 20;
-export const SEARCH_MAX_PAGES = 3;
-/** Teto de itens coletados por query: `SEARCH_PAGE_SIZE * SEARCH_MAX_PAGES`. */
-export const SEARCH_COLLECTED_ITEMS_CAP = SEARCH_PAGE_SIZE * SEARCH_MAX_PAGES;
-/**
- * Acima disto a busca é ampla o bastante para valer um aviso de refinamento, mesmo seguindo em
- * frente. É o antigo `RAW_SEARCH_RESULTS_CAP` com o papel que sobrou: sinalizar, não bloquear.
- */
-export const BROAD_SEARCH_WARNING_THRESHOLD = 150;
-/**
- * Teto do pré-ranking. Diferente de `SEARCH_COLLECTED_ITEMS_CAP`, que vale **por query**, este vale
- * sobre o conjunto já deduplicado de todas as queries — com 5 queries o pool pode chegar perto de
- * 300 itens antes do corte.
- *
- * Ordenar não custa nada (é função pura, sem modelo e sem rede), então o corte não existe para
- * economizar: existe para o round-robin por Câmara de HU-16 escolher dentro de um conjunto que
- * ainda é relevante. Quem decide custo é `SCRATCHPAD_LIMIT`.
- */
-export const SEARCH_CANDIDATE_LIMIT = 60;
-/**
- * Quantas decisões são lidas a fundo (uma chamada de modelo cada, etapa MAP).
- *
- * **Decisão de 2026-09-13 (`docs/escopo.md`)**: é o mesmo número do pré-ranking, de propósito —
- * tudo que sobreviveu à ordenação é analisado, sem um segundo corte no meio do caminho. Antes eram
- * 10 de 30 ranqueados, e os 20 descartados nunca eram explicados a ninguém.
- *
- * Derivado de `SEARCH_CANDIDATE_LIMIT` em vez de repetir o literal: são conceitualmente o mesmo
- * conjunto, e vê-los divergir por edição de um só foi exatamente o que motivou a mudança.
- */
-export const SCRATCHPAD_LIMIT = SEARCH_CANDIDATE_LIMIT;
+export const RAW_SEARCH_RESULTS_CAP = 150;
+export const SEARCH_CANDIDATE_LIMIT = 30;
+export const SCRATCHPAD_LIMIT = 10;
 export const FINAL_EVIDENCE_LIMIT = 8;
 
 /**
@@ -68,14 +31,6 @@ export const MIN_VALID_SCRATCHPADS = 3;
  * é a sugestão inicial", sem fila distribuída).
  */
 export const SCRATCHPAD_CONCURRENCY = 4;
-
-/**
- * Custo de uma execução na etapa MAP, para não ser surpresa: são `SCRATCHPAD_LIMIT` chamadas de
- * modelo **e** `SCRATCHPAD_LIMIT` requisições de inteiro teor à fonte, em ondas de
- * `SCRATCHPAD_CONCURRENCY`. Com 60 e 4, são 15 ondas — medido em ~12s por onda, algo perto de 3
- * minutos. Subir a concorrência encurta isso, mas multiplica a pressão sobre o portal do TJPR na
- * mesma proporção, e é justamente o rate limit que HU-38 ainda não respondeu.
- */
 
 /**
  * Limiar de aceitação "near-literal" na verificação de evidências (HU-24): fração mínima de tokens
@@ -99,9 +54,5 @@ export const DIVIDED_CONVERGENCE_MARGIN = 0.15;
  * com cinco listas de IDs, riscos e argumentos, e cresce com o tamanho do caso. Estourar o teto
  * trunca o JSON no meio e a falha chega como `STRUCTURED_OUTPUT_NOT_JSON` — um erro de forma que
  * parece erro de modelo e consome as três tentativas sem chance de acerto.
- *
- * Dobrado em 2026-09-13 junto com `SCRATCHPAD_LIMIT` (10 → 60): as listas de decisões da saída são
- * uma por questão jurídica e crescem com o número de Scratchpads, então o teto que servia a 10
- * truncaria a resposta a 60.
  */
-export const CROSS_FILE_MAX_OUTPUT_TOKENS = 32000;
+export const CROSS_FILE_MAX_OUTPUT_TOKENS = 16000;

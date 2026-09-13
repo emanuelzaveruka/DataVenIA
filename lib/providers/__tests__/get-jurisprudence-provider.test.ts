@@ -8,14 +8,8 @@ describe("getJurisprudenceProvider", () => {
     expect(provider.name).toBe("fixture");
   });
 
-  it("uses the real portal and nothing else when JURISPRUDENCE_PROVIDER=tjpr", () => {
+  it("uses TJPR as primary when configured, with visible fixture fallback", async () => {
     const provider = getJurisprudenceProvider({ JURISPRUDENCE_PROVIDER: "tjpr" });
-
-    expect(provider.name).toBe("tjpr");
-  });
-
-  it("only composes the fixture fallback when it is asked for explicitly", () => {
-    const provider = getJurisprudenceProvider({ JURISPRUDENCE_PROVIDER: "tjpr+fixture" });
 
     expect(provider.name).toBe("resilient(tjpr+fixture)");
   });

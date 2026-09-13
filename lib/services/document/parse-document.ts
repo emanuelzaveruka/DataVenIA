@@ -6,27 +6,10 @@ import { toolFailure, toolSuccess, type ToolResult } from "../../errors/tool-res
 import { hashBuffer } from "./hash";
 import type { ParsedDocument, SupportedMimeType } from "../../schemas/document.schema";
 
-/**
- * `perPage` existe para o modo auditoria (§14): com o texto junto não dá para distinguir um PDF
- * lido por inteiro de um cuja metade das páginas é imagem escaneada — o total de caracteres parece
- * plausível nos dois casos. Página a página, uma página vazia no meio denuncia o problema.
- *
- * O caminho normal continua em `mergePages: true`: é uma chamada a menos de junção e o pipeline
- * não tem o que fazer com o array.
- */
-async function extractPdfText(
-  buffer: Buffer,
-  perPage: boolean,
-): Promise<{ text: string; pageCount: number; pageTexts?: string[] }> {
+async function extractPdfText(buffer: Buffer): Promise<{ text: string; pageCount: number }> {
   const pdf = await getDocumentProxy(new Uint8Array(buffer));
-
-  if (!perPage) {
-    const { text, totalPages } = await extractText(pdf, { mergePages: true });
-    return { text, pageCount: totalPages };
-  }
-
-  const { text, totalPages } = await extractText(pdf, { mergePages: false });
-  return { text: text.join("\n\n"), pageCount: totalPages, pageTexts: text };
+  const { text, totalPages } = await extractText(pdf, { mergePages: true });
+  return { text, pageCount: totalPages };
 }
 
 async function extractDocxText(buffer: Buffer): Promise<string> {
@@ -38,18 +21,15 @@ export async function parseDocument(
   buffer: Buffer,
   fileName: string,
   mimeType: SupportedMimeType,
-  options: { perPage?: boolean } = {},
 ): Promise<ToolResult<ParsedDocument>> {
   try {
     let text: string;
     let pageCount: number | undefined;
-    let pageTexts: string[] | undefined;
 
     if (mimeType === "application/pdf") {
-      const extracted = await extractPdfText(buffer, options.perPage === true);
+      const extracted = await extractPdfText(buffer);
       text = extracted.text;
       pageCount = extracted.pageCount;
-      pageTexts = extracted.pageTexts;
     } else if (
       mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     ) {
@@ -83,7 +63,6 @@ export async function parseDocument(
       mimeType,
       text: trimmed,
       pages: pageCount,
-      pageTexts,
       metadata: {
         pageCount,
         hash: hashBuffer(buffer),

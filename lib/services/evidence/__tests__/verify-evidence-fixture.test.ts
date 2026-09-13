@@ -79,7 +79,7 @@ describe("verifyEvidence over the versioned fixture", () => {
     const byId = new Map(result.data.evidences.map((evidence) => [evidence.evidenceId, evidence]));
     expect(byId.get("EV-1")?.verified).toBe(true);
     expect(byId.get("EV-2")?.verified).toBe(false);
-    expect(byId.get("EV-1")?.source.url).toContain("fixture.datavenia.invalid");
+    expect(byId.get("EV-1")?.source.url).toContain("portal.tjpr.jus.br");
 
     const policy = enforceEvidencePolicy(analyses, result.data.evidences);
     expect(policy.analyses[0]!.suggestedArguments).toHaveLength(1);

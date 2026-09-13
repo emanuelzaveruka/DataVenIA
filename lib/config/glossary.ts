@@ -2,7 +2,7 @@
  * Fonte única dos textos de ajuda contextual ("?") da interface.
  *
  * Por que um arquivo de configuração e não texto solto no JSX: os mesmos termos aparecem no painel
- * de progresso, no relatório e em `public/como-funciona.html`. Escritos em três lugares, divergiriam
+ * de progresso, no relatório e em `docs/como-funciona.html`. Escritos em três lugares, divergiriam
  * na primeira mudança de pipeline — e a explicação errada de uma etapa é pior do que nenhuma.
  * `lib/config/__tests__/glossary.test.ts` amarra os três.
  *

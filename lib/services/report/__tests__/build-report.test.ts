@@ -73,10 +73,7 @@ describe("buildReport — seções do §3.10 (HU-26)", () => {
 
   it("never exposes a percentage of success anywhere in the serialized report (critério de aceite 11)", () => {
     const report = expectReport(build());
-    // A URL canônica do portal é percent-encoded (`…/d%c3%bavida/…`), e "3%" casaria com o padrão
-    // de percentual sem ter nada a ver com métrica de êxito. O critério 11 é sobre o que o
-    // relatório *afirma*, então a varredura cobre o texto — não o endereço da fonte.
-    const serialized = JSON.stringify(report, (key, value) => (key === "url" ? undefined : value)).toLowerCase();
+    const serialized = JSON.stringify(report).toLowerCase();
 
     expect(serialized).not.toContain("chance de");
     expect(serialized).not.toContain("probabilidade de êxito");

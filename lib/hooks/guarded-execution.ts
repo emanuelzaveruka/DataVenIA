@@ -2,7 +2,7 @@ import { createAppError, type AppError } from "../errors/app-error";
 import { toolFailure, type ToolResult } from "../errors/tool-result";
 import type { ExecutionRecorder } from "../observability/execution-recorder";
 import type { WorkflowStage } from "../workflow/state-machine";
-import { postToolUse, type ToolResultValidator } from "./post-tool-use";
+import { postToolUse } from "./post-tool-use";
 import { preToolUse, type ToolName } from "./pre-tool-use";
 
 export interface GuardedExecutionConfig {
@@ -15,7 +15,7 @@ export interface GuardedExecution {
   run<T>(
     toolName: ToolName,
     operation: () => Promise<ToolResult<T>>,
-    validator?: ToolResultValidator<T>,
+    validator?: <T>(result: ToolResult<T>) => ToolResult<T>,
   ): Promise<ToolResult<T>>;
 }
 
@@ -37,17 +37,15 @@ function blockedToolError(stage: WorkflowStage, toolName: ToolName, cause: unkno
 }
 
 /**
- * Porta unica de execucao de tools: PreToolUse bloqueia antes da chamada real, a execucao
- * autorizada e cronometrada aqui, e PostToolUse centraliza segunda camada e telemetria sobre o
- * resultado — nessa ordem, para que a linha de `tool_executions` registre o veredito final da
- * chamada e nao o do servico antes da checagem de contrato.
+ * Porta unica de execucao de tools: PreToolUse bloqueia antes da chamada real, o recorder mede a
+ * execucao autorizada, e PostToolUse centraliza telemetria/segunda camada apos o resultado.
  */
 export function createGuardedExecution(config: GuardedExecutionConfig): GuardedExecution {
   return {
     async run<T>(
       toolName: ToolName,
       operation: () => Promise<ToolResult<T>>,
-      validator?: ToolResultValidator<T>,
+      validator?: <T>(result: ToolResult<T>) => ToolResult<T>,
     ): Promise<ToolResult<T>> {
       const stage = config.getStage();
 
@@ -60,15 +58,8 @@ export function createGuardedExecution(config: GuardedExecutionConfig): GuardedE
         return toolFailure(error);
       }
 
-      const startedAtMs = Date.now();
-      const result = await operation();
-      return postToolUse(result, {
-        stage,
-        toolName,
-        recorder: config.recorder,
-        startedAtMs,
-        validator,
-      });
+      const result = await config.recorder.run(toolName, operation);
+      return postToolUse(result, { stage, toolName, validator });
     },
   };
 }

@@ -4,7 +4,6 @@ import { z } from "zod";
 import { getLlmProvider } from "../../../lib/llm/get-llm-provider";
 import { getJurisprudenceProvider } from "../../../lib/providers/get-jurisprudence-provider";
 import { getRepository } from "../../../lib/persistence/get-repository";
-import { getAuditLevel } from "../../../lib/config/audit";
 import { statusForError } from "../../../lib/errors/http-status";
 import type { AppError } from "../../../lib/errors/app-error";
 import {
@@ -59,23 +58,7 @@ export async function POST(request: Request) {
     return errorResponse(pipelineUnexpectedError("getLlmProvider", cause));
   }
 
-  // Mesmo tratamento dos demais: `JURISPRUDENCE_PROVIDER` escrito errado é erro de configuração, e
-  // vazar como 500 não tratado esconde a única informação útil — qual valor é inválido.
-  let jurisprudenceProvider;
-  try {
-    jurisprudenceProvider = getJurisprudenceProvider();
-  } catch (cause) {
-    return errorResponse(pipelineUnexpectedError("getJurisprudenceProvider", cause));
-  }
-
-  // Também antes do primeiro byte: `PIPELINE_AUDIT` mal escrito é erro de configuração, e descobrir
-  // isso no fim de uma execução inteira seria pior do que recusar agora.
-  let auditLevel;
-  try {
-    auditLevel = getAuditLevel();
-  } catch (cause) {
-    return errorResponse(pipelineUnexpectedError("getAuditLevel", cause));
-  }
+  const jurisprudenceProvider = getJurisprudenceProvider();
 
   const formData = await request.formData();
   const file = formData.get("file");
@@ -159,14 +142,7 @@ export async function POST(request: Request) {
             extraTerms,
             filters,
           },
-          {
-            repository,
-            llmProvider,
-            crossFileLlmProvider,
-            jurisprudenceProvider,
-            signal: controller.signal,
-            auditLevel,
-          },
+          { repository, llmProvider, crossFileLlmProvider, jurisprudenceProvider, signal: controller.signal },
         )) {
           write(event);
         }

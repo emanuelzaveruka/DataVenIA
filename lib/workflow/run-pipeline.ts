@@ -21,30 +21,11 @@ import {
   type PipelineProgressStep,
 } from "../observability/pipeline-progress";
 import { createGuardedExecution } from "../hooks/guarded-execution";
-import {
-  validateEvidenceHandoff,
-  validateReportHandoff,
-  validateSanitizationHandoff,
-  validateScratchpadBatchHandoff,
-} from "./handoff-validators";
 import { PIPELINE_VERSION, scratchpadVersions } from "../config/versions";
-import {
-  BROAD_SEARCH_WARNING_THRESHOLD,
-  MIN_VALID_SCRATCHPADS,
-  SCRATCHPAD_LIMIT,
-  SEARCH_CANDIDATE_LIMIT,
-  SEARCH_COLLECTED_ITEMS_CAP,
-} from "../config/limits";
+import { MIN_VALID_SCRATCHPADS } from "../config/limits";
 import { createAppError, type AppError } from "../errors/app-error";
 import { statusForError } from "../errors/http-status";
-import { createAuditedLlmProvider, type LlmCallRecord } from "../llm/audited-llm-provider";
-import { auditsArtifacts, auditsRawText, type AuditLevel } from "../config/audit";
-import {
-  createStageRecorder,
-  type AgentTaskInfo,
-  type NodeExecutionDetail,
-  type PipelineStageEvent,
-} from "./pipeline-stage-event";
+import { createStageRecorder, type NodeExecutionDetail, type PipelineStageEvent } from "./pipeline-stage-event";
 import type { WorkflowStage } from "./state-machine";
 import type { JurisprudenceSearchItem } from "../schemas/search.schema";
 import type { DataVeniaRepository } from "../persistence/repository";
@@ -115,12 +96,6 @@ export interface RunPipelineDeps {
    */
   jurisprudenceProvider: JurisprudenceProvider;
   signal?: AbortSignal;
-  /**
-   * Modo auditoria (§14). Em `"off"` — o default — cada nó emite exatamente as contagens que sempre
-   * emitiu; acima disso, emite também o artefato que produziu e as chamadas de modelo que fez.
-   * Ligar isto muda o que sai no stream, nunca o que o pipeline calcula ou persiste.
-   */
-  auditLevel?: AuditLevel;
 }
 
 /** Exatamente o corpo que a rota sempre devolveu — extraído como tipo, não redesenhado. */
@@ -197,62 +172,10 @@ export async function* runPipeline(
   input: RunPipelineInput,
   deps: RunPipelineDeps,
 ): AsyncGenerator<PipelineEvent, void> {
-  const { repository, jurisprudenceProvider: sourceProvider, signal } = deps;
+  const { repository, llmProvider, jurisprudenceProvider: sourceProvider, signal } = deps;
+  const crossFileLlmProvider = deps.crossFileLlmProvider ?? llmProvider;
   const { runId, traceId, file } = input;
   const filtrosDoUsuario = input.filters;
-
-  const auditLevel = deps.auditLevel ?? "off";
-  const audit = auditsArtifacts(auditLevel);
-  const auditRaw = auditsRawText(auditLevel);
-
-  // Buffer das chamadas de modelo desde a última etapa. É drenado por `llmSubTasks`, de modo que
-  // cada nó leva as chamadas que ele mesmo fez — incluindo as tentativas repetidas do
-  // retry-com-contexto (§11.7), que é onde o ciclo de correção fica visível.
-  const pendingLlmCalls: LlmCallRecord[] = [];
-  const auditLlm = (provider: LlmProvider): LlmProvider =>
-    audit ? createAuditedLlmProvider(provider, (record) => pendingLlmCalls.push(record)) : provider;
-
-  const llmProvider = auditLlm(deps.llmProvider);
-  // Envolver o mesmo objeto duas vezes registraria cada chamada em duplicata; quando o cross-file
-  // roda no mesmo modelo, ele reusa o provider já auditado.
-  const crossFileLlmProvider =
-    deps.crossFileLlmProvider && deps.crossFileLlmProvider !== deps.llmProvider
-      ? auditLlm(deps.crossFileLlmProvider)
-      : llmProvider;
-
-  /**
-   * Combina a saída resumida (o que o stream sempre carregou) com o artefato completo, só no modo
-   * auditoria. O resumo nunca é substituído: quem lê o painel continua vendo a contagem no mesmo
-   * lugar, e quem audita ganha o conteúdo ao lado.
-   */
-  function auditOutput(
-    summary: Record<string, unknown>,
-    full: () => Record<string, unknown>,
-  ): Record<string, unknown> {
-    return audit ? { ...summary, ...full() } : summary;
-  }
-
-  /** As chamadas de modelo acumuladas viram sub-tarefas do nó que está fechando. */
-  function llmSubTasks(): AgentTaskInfo[] | undefined {
-    if (!audit || pendingLlmCalls.length === 0) return undefined;
-    const drained = pendingLlmCalls.splice(0, pendingLlmCalls.length);
-    return drained.map((call) => ({
-      id: `llm-${call.callIndex}-${call.schemaName}`,
-      name: `${call.schemaName} · tentativa ${call.callIndex} · ${call.respondedBy ?? call.model}`,
-      status: call.outcome === "OK" ? "COMPLETED" : "FAILED",
-      durationMs: call.durationMs,
-      input: {
-        provider: call.provider,
-        model: call.model,
-        respondedBy: call.respondedBy,
-        maxOutputTokens: call.maxOutputTokens,
-        system: call.system,
-        prompt: call.prompt,
-      },
-      output: call.output,
-      error: call.outcome === "ERROR" ? { code: call.errorCode, description: call.errorDescription } : undefined,
-    }));
-  }
 
   const recorder = createStageRecorder();
   const startedAt = new Date().toISOString();
@@ -312,9 +235,6 @@ export async function* runPipeline(
       type: "stage",
       event: recorder.record(stage, label, "FAILED", startedAtMs, {
         ...detail,
-        // As chamadas de modelo pendentes entram aqui mesmo quando a etapa falha — é justamente o
-        // momento em que ver o prompt que produziu a saída recusada tem mais valor.
-        subTasks: detail.subTasks ?? llmSubTasks(),
         error: errorDetail(error),
       }),
     };
@@ -391,9 +311,7 @@ export async function* runPipeline(
   yield { type: "stage", event: recorder.start("PARSING", "Extração de Texto", parsingDetail) };
   const tParse = Date.now();
   const parsed = await guardedExecution.run("parseDocument", () =>
-    // Página a página no modo auditoria: é o que distingue um PDF lido por inteiro de um em que
-    // metade das páginas é imagem escaneada — no total de caracteres os dois parecem plausíveis.
-    parseDocument(buffer, file.name, validation.data.mimeType, { perPage: audit }),
+    parseDocument(buffer, file.name, validation.data.mimeType),
   );
   if (parsed.isError) {
     yield* failStage("PARSING", "Extração de Texto", tParse, parsed.error, {
@@ -406,23 +324,11 @@ export async function* runPipeline(
     type: "stage",
     event: recorder.record("PARSING", "Extração de Texto", "COMPLETED", tParse, {
       ...parsingDetail,
-      output: auditOutput(
-        {
-          documentId: parsed.data.documentId,
-          metadata: parsed.data.metadata,
-          charCount: parsed.data.text.length,
-        },
-        () => ({
-          pages: (parsed.data.pageTexts ?? []).map((pageText, index) => ({
-            page: index + 1,
-            charCount: pageText.trim().length,
-            // O texto em si só no nível `full`: é o único artefato do pipeline anterior à
-            // sanitização, e por isso não viaja junto com o resto (HU-05/HU-06).
-            text: auditRaw ? pageText : undefined,
-          })),
-          rawText: auditRaw ? parsed.data.text : undefined,
-        }),
-      ),
+      output: {
+        documentId: parsed.data.documentId,
+        metadata: parsed.data.metadata,
+        charCount: parsed.data.text.length,
+      },
       logs: [
         `[INFO] Texto extraído (${parsed.data.text.length} caracteres, ${parsed.data.metadata.pageCount} páginas).`,
       ],
@@ -437,17 +343,8 @@ export async function* runPipeline(
   };
   yield { type: "stage", event: recorder.start("SANITIZING", "Sanitização PII (HU-05)", sanitizingDetail) };
   const tSan = Date.now();
-  const sanitized = await guardedExecution.run(
-    "sanitizeDocument",
-    async () =>
-      sanitizeDocument(parsed.data.documentId, parsed.data.text, {
-        collectSpans: audit,
-        includeOriginal: auditRaw,
-      }),
-    validateSanitizationHandoff({
-      documentId: parsed.data.documentId,
-      allowRawOriginals: auditRaw,
-    }),
+  const sanitized = await guardedExecution.run("sanitizeDocument", async () =>
+    sanitizeDocument(parsed.data.documentId, parsed.data.text),
   );
   if (sanitized.isError) {
     yield* failStage("SANITIZING", "Sanitização PII (HU-05)", tSan, sanitized.error, {
@@ -460,19 +357,10 @@ export async function* runPipeline(
     type: "stage",
     event: recorder.record("SANITIZING", "Sanitização PII (HU-05)", "COMPLETED", tSan, {
       ...sanitizingDetail,
-      output: auditOutput(
-        {
-          redactionsCount: sanitized.data.redactions.length,
-          sanitizedLength: sanitized.data.sanitizedText.length,
-        },
-        () => ({
-          redactions: sanitized.data.redactions,
-          // Uma linha por ocorrência mascarada, com a frase ao redor: é o que permite conferir num
-          // documento real se o detector pegou o que devia — e o que ele deixou passar.
-          spans: sanitized.data.spans,
-          sanitizedText: sanitized.data.sanitizedText,
-        }),
-      ),
+      output: {
+        redactionsCount: sanitized.data.redactions.length,
+        sanitizedLength: sanitized.data.sanitizedText.length,
+      },
       logs: [`[INFO] ${sanitized.data.redactions.length} dados pessoais mascarados/sanitizados.`],
     }),
   };
@@ -525,14 +413,10 @@ export async function* runPipeline(
     type: "stage",
     event: recorder.record("DOCUMENT_ANALYSIS", "Análise de Caso (LLM)", "COMPLETED", tCase, {
       ...caseDetail,
-      output: auditOutput(
-        {
-          legalIssuesCount: caseAnalysis.data.legalIssues.length,
-          factsCount: caseAnalysis.data.facts.length,
-        },
-        () => ({ caseAnalysis: caseAnalysis.data }),
-      ),
-      subTasks: llmSubTasks(),
+      output: {
+        legalIssuesCount: caseAnalysis.data.legalIssues.length,
+        factsCount: caseAnalysis.data.facts.length,
+      },
       logs: [
         `[INFO] Análise do caso concluída com ${caseAnalysis.data.legalIssues.length} teses jurídicas mapeadas.`,
       ],
@@ -580,7 +464,6 @@ export async function* runPipeline(
     event: recorder.record("QUERY_GENERATION", "Geração de Queries", "COMPLETED", tQueries, {
       ...queryDetail,
       output: { totalQueries: queryPlan.data.queries.length, queries: queryPlan.data.queries },
-      subTasks: llmSubTasks(),
       logs: [`[INFO] ${queryPlan.data.queries.length} pesquisas jurídicas personalizadas foram criadas.`],
     }),
   };
@@ -629,74 +512,23 @@ export async function* runPipeline(
   const tSearch = Date.now();
   const foundItems: JurisprudenceSearchItem[] = [];
   const jurisprudenceSources = new Set<string>();
-  /** Buscas que a fixture respondeu no lugar da fonte configurada — ver o `[AVISO]` da etapa. */
-  const degradedSources: string[] = [];
-  // Uma sub-tarefa por query: é o que permite abrir no navegador exatamente a mesma URL que o
-  // código consultou e comparar o resultado com o portal, em vez de reconstruí-la à mão.
-  const searchSubTasks: AgentTaskInfo[] = [];
-  /** Queries amplas o bastante para valer um aviso de refinamento — nenhuma delas impede o run. */
-  const broadQueries: string[] = [];
   for (const searchQuery of queriesParaBuscar) {
     if (signal?.aborted) break;
     // O recorte acompanha TODA query: o funil de HU-13 conta o total por busca, e aplicar em
     // só algumas daria um total que não corresponde a recorte nenhum.
     const query = { query: searchQuery.query, filters: filtrosDoUsuario };
-    const tQuery = Date.now();
     const searchResult = await guardedExecution.run("searchJurisprudence", () =>
       jurisprudenceProvider.search(query),
     );
     if (searchResult.isError) {
-      searchSubTasks.push({
-        id: `busca-${searchSubTasks.length + 1}`,
-        name: searchQuery.query,
-        status: "FAILED",
-        durationMs: Date.now() - tQuery,
-        input: { query: searchQuery.query, intent: searchQuery.intent, legalIssueId: searchQuery.legalIssueId },
-        error: { code: searchResult.error.code, description: searchResult.error.description },
-      });
       yield* failStage("SEARCH", "Busca Jurisprudencial", tSearch, searchResult.error, {
         ...searchDetail,
         input: { query: searchQuery.query },
-        subTasks: audit ? searchSubTasks : undefined,
       });
       return;
     }
     const searchProvider = searchResult.metadata?.source ?? sourceProvider.name;
     jurisprudenceSources.add(searchProvider);
-    // Só acontece no modo `tjpr+fixture`, que é opt-in: o provider primário falhou e a resposta veio
-    // do fallback. Precisa de aviso, não de uma string discreta no rodapé — a fixture nunca devolve
-    // vazio, então uma degradação despercebida entrega um relatório completo sobre acórdãos que não
-    // existem. Comparar com o nome do provider configurado é o que torna o desvio detectável.
-    if (sourceProvider.name !== "fixture" && searchProvider === "fixture" && !degradedSources.includes(searchQuery.query)) {
-      degradedSources.push(searchQuery.query);
-    }
-
-    searchSubTasks.push({
-      id: `busca-${searchSubTasks.length + 1}`,
-      name: searchQuery.query,
-      status: "COMPLETED",
-      durationMs: Date.now() - tQuery,
-      input: {
-        query: searchQuery.query,
-        intent: searchQuery.intent,
-        legalIssueId: searchQuery.legalIssueId,
-        reason: searchQuery.reason,
-        // Vazio na fixture, que não fala HTTP; presente sempre que a fonte for o portal real.
-        url: searchResult.metadata?.url,
-      },
-      output: {
-        provider: searchProvider,
-        // O total que a fonte declarou ter, que não é o que veio: o portal responde por página.
-        totalCount: searchResult.data.totalCount,
-        itemsReturned: searchResult.data.items.length,
-        // Quantas páginas o portal realmente entregou. Ficar em 1 com `SEARCH_MAX_PAGES = 3`
-        // significa que o parâmetro de paginação ainda não está configurado (HU-38).
-        pagesFetched: searchResult.metadata?.pagesFetched,
-        collectedCap: SEARCH_COLLECTED_ITEMS_CAP,
-        broad: searchResult.data.totalCount > BROAD_SEARCH_WARNING_THRESHOLD,
-        items: audit ? searchResult.data.items : undefined,
-      },
-    });
 
     const savedSearch = await repository.saveSearch({
       searchId: randomUUID(),
@@ -713,10 +545,11 @@ export async function* runPipeline(
     }
 
     const funneled = applySearchFunnel(searchResult.data);
-    foundItems.push(...funneled.items);
-    // Busca ampla demais não derruba mais a execução (decisão de 2026-09-13, `docs/escopo.md`):
-    // vira aviso, para o usuário saber que vale refinar por período, Câmara ou relator.
-    if (funneled.broad) broadQueries.push(searchQuery.query);
+    if (funneled.isError) {
+      yield* failRun(funneled.error);
+      return;
+    }
+    foundItems.push(...funneled.data);
   }
 
   const uniqueItems = dedupeSearchItems(foundItems);
@@ -735,39 +568,8 @@ export async function* runPipeline(
     type: "stage",
     event: recorder.record("SEARCH", "Busca Jurisprudencial", "COMPLETED", tSearch, {
       ...searchDetail,
-      output: auditOutput(
-        { totalFound: uniqueItems.length, selectedCount: selected.data.length },
-        () => ({
-          rankedCap: SEARCH_CANDIDATE_LIMIT,
-          scratchpadCap: SCRATCHPAD_LIMIT,
-          collectedCap: SEARCH_COLLECTED_ITEMS_CAP,
-          broadQueries,
-          // O score e sua composição por critério: é o que explica por que um acórdão entrou e
-          // outro ficou de fora, sem reabrir `pre-rank.ts`.
-          ranked: ranked.map((candidate) => ({
-            id: candidate.item.id,
-            processNumber: candidate.item.processNumber,
-            chamber: candidate.item.chamber,
-            judgmentDate: candidate.item.judgmentDate,
-            url: candidate.item.url,
-            score: candidate.score,
-            scoreBreakdown: candidate.scoreBreakdown,
-            selected: selected.data.some((item) => item.item.id === candidate.item.id),
-          })),
-        }),
-      ),
-      subTasks: audit ? searchSubTasks : undefined,
-      logs: [
-        `[INFO] ${uniqueItems.length} acórdãos encontrados; top ${selected.data.length} selecionados.`,
-        ...(broadQueries.length > 0
-          ? [`[AVISO] ${broadQueries.length} busca(s) muito ampla(s); refine por período, Câmara ou relator.`]
-          : []),
-        ...(degradedSources.length > 0
-          ? [
-              `[AVISO] A fonte configurada (${sourceProvider.name}) falhou em ${degradedSources.length} busca(s) e a fixture respondeu no lugar. Decisões de fixture são fictícias: não serão exibidas como fonte.`,
-            ]
-          : []),
-      ],
+      output: { totalFound: uniqueItems.length, selectedCount: selected.data.length },
+      logs: [`[INFO] ${uniqueItems.length} acórdãos encontrados; top ${selected.data.length} selecionados.`],
     }),
   };
 
@@ -795,13 +597,8 @@ export async function* runPipeline(
   const tScratch = Date.now();
   const versions = scratchpadVersions(llmProvider);
   const scratchpadCache = createRepositoryScratchpadCache({ repository, runId, versions });
-  const scratchpadBatch = await guardedExecution.run(
-    "generateScratchpads",
-    () =>
-      generateScratchpads(selected.data, llmProvider, jurisprudenceProvider, undefined, scratchpadCache, signal),
-    validateScratchpadBatchHandoff({
-      selectedCandidateIds: selected.data.map((candidate) => candidate.item.id),
-    }),
+  const scratchpadBatch = await guardedExecution.run("generateScratchpads", () =>
+    generateScratchpads(selected.data, llmProvider, jurisprudenceProvider, undefined, scratchpadCache, signal),
   );
   if (scratchpadBatch.isError) {
     yield* failStage(
@@ -828,45 +625,11 @@ export async function* runPipeline(
     return;
   }
 
-  // Uma sub-tarefa por decisão: é onde o pool de `SCRATCHPAD_CONCURRENCY` workers (uma chamada de
-  // modelo por decisão, nunca em lote — HU-17) fica visível como trabalho paralelo de fato.
-  const scratchpadSubTasks: AgentTaskInfo[] | undefined = audit
-    ? [
-        ...scratchpadBatch.data.scratchpads.map((scratchpad) => ({
-          id: scratchpad.scratchpadId,
-          name: `${scratchpad.source.processNumber ?? scratchpad.source.sourceId} · ${scratchpad.status}`,
-          status: (scratchpad.status === "VALID" ? "COMPLETED" : "FAILED") as AgentTaskInfo["status"],
-          input: { decisionId: scratchpad.source.sourceId, url: scratchpad.source.url },
-          output: scratchpad,
-        })),
-        ...scratchpadBatch.data.failures.map((failure) => ({
-          id: `falha-${failure.candidateId}`,
-          name: `${failure.candidateId} · ${failure.error.code}`,
-          status: "FAILED" as AgentTaskInfo["status"],
-          input: { decisionId: failure.candidateId },
-          error: { code: failure.error.code, description: failure.error.description, metadata: failure.error.metadata },
-        })),
-        // As chamadas de modelo da etapa MAP — uma por decisão (HU-17) — entram aqui junto com o
-        // resultado de cada uma. Sem drená-las neste nó elas vazariam para o cross-file, que
-        // apareceria carregando prompts que não são dele.
-        ...(llmSubTasks() ?? []),
-      ]
-    : undefined;
-
   yield {
     type: "stage",
     event: recorder.record("SCRATCHPAD_GENERATION", "Geração de Scratchpads", "COMPLETED", tScratch, {
       ...scratchpadDetail,
-      subTasks: scratchpadSubTasks,
-      output: auditOutput(
-        { validCount: validScratchpads.length, status: scratchpadBatch.data.status },
-        () => ({
-          requested: scratchpadBatch.data.requested,
-          processed: scratchpadBatch.data.processed,
-          failed: scratchpadBatch.data.failed,
-          failures: scratchpadBatch.data.failures,
-        }),
-      ),
+      output: { validCount: validScratchpads.length, status: scratchpadBatch.data.status },
       logs: [`[INFO] ${validScratchpads.length} scratchpads gerados e validados por proposição.`],
     }),
   };
@@ -904,15 +667,7 @@ export async function* runPipeline(
     type: "stage",
     event: recorder.record("CROSS_FILE_ANALYSIS", "Análise Cruzada", "COMPLETED", tCross, {
       ...crossFileDetail,
-      output: auditOutput(
-        { analysesCount: crossFile.data.analyses.length },
-        () => ({
-          analyses: crossFile.data.analyses,
-          // Derivado em código, nunca perguntado ao modelo (HU-22) — vale registrar qual foi.
-          opposingPrecedentsFound: crossFile.data.opposingPrecedentsFound,
-        }),
-      ),
-      subTasks: llmSubTasks(),
+      output: { analysesCount: crossFile.data.analyses.length },
       logs: [`[INFO] Análise cruzada das teses e precedentes finalizada com sucesso.`],
     }),
   };
@@ -951,66 +706,19 @@ export async function* runPipeline(
   };
   yield { type: "stage", event: recorder.start("EVIDENCE_VERIFICATION", "Verificação de Evidências", evidenceDetail) };
   const tEv = Date.now();
-  const evidence = await guardedExecution.run(
-    "verifyEvidence",
-    () => verifyEvidence(crossFile.data.analyses, scratchpadBatch.data.scratchpads, sourceProvider),
-    validateEvidenceHandoff({ scratchpads: scratchpadBatch.data.scratchpads }),
+  const evidence = await guardedExecution.run("verifyEvidence", () =>
+    verifyEvidence(crossFile.data.analyses, scratchpadBatch.data.scratchpads, sourceProvider),
   );
   if (evidence.isError) {
     yield* failStage("EVIDENCE_VERIFICATION", "Verificação de Evidências", tEv, evidence.error, evidenceDetail);
     return;
   }
 
-  // Uma sub-tarefa por decisão reaberta, com o veredito de cada citação. Sem `matchKind` e
-  // `similarity` ao lado do trecho, "8 evidências verificadas" não é conferível: é justamente aqui
-  // que se vê uma citação que o modelo aproximou demais, ou uma fonte que mudou desde a coleta.
-  const evidenceSubTasks: AgentTaskInfo[] | undefined = audit
-    ? [
-        ...Object.entries(
-          evidence.data.evidences.reduce<Record<string, typeof evidence.data.evidences>>((acc, item) => {
-            (acc[item.scratchpadId] ??= []).push(item);
-            return acc;
-          }, {}),
-        ).map(([scratchpadId, items]) => ({
-          id: scratchpadId,
-          name: `${items[0]?.source.processNumber ?? scratchpadId} · ${items.filter((i) => i.verified).length}/${items.length} conferidas`,
-          status: (items.some((i) => i.verified) ? "COMPLETED" : "FAILED") as AgentTaskInfo["status"],
-          input: {
-            url: items[0]?.source.url,
-            sourceHashNoScratchpad: items[0]?.source.sourceHash,
-            fonteAlterada: evidence.data.staleScratchpadIds.includes(scratchpadId),
-          },
-          output: items.map((item) => ({
-            evidenceId: item.evidenceId,
-            verified: item.verified,
-            matchKind: item.matchKind,
-            similarity: item.similarity,
-            quote: item.quote,
-          })),
-        })),
-        ...evidence.data.failures.map((failure) => ({
-          id: `falha-${failure.scratchpadId}`,
-          name: `${failure.scratchpadId} · ${failure.error.code}`,
-          status: "FAILED" as AgentTaskInfo["status"],
-          error: { code: failure.error.code, description: failure.error.description },
-        })),
-      ]
-    : undefined;
-
   yield {
     type: "stage",
     event: recorder.record("EVIDENCE_VERIFICATION", "Verificação de Evidências", "COMPLETED", tEv, {
       ...evidenceDetail,
-      subTasks: evidenceSubTasks,
-      output: auditOutput(
-        { verifiedCount: evidence.data.verifiedCount },
-        () => ({
-          rejectedCount: evidence.data.rejectedCount,
-          staleScratchpadIds: evidence.data.staleScratchpadIds,
-          failures: evidence.data.failures,
-          evidences: evidence.data.evidences,
-        }),
-      ),
+      output: { verifiedCount: evidence.data.verifiedCount },
       logs: [`[INFO] ${evidence.data.verifiedCount} citações checadas e auditadas anti-alucinação.`],
     }),
   };
@@ -1045,19 +753,13 @@ export async function* runPipeline(
   yield { type: "stage", event: recorder.start("REPORT_GENERATION", "Geração de Relatório", reportDetail) };
   const tRep = Date.now();
   const evidencePolicy = enforceEvidencePolicy(crossFile.data.analyses, evidence.data.evidences);
-  const report = await guardedExecution.run(
-    "buildReport",
-    async () =>
-      buildReport({
-        caseAnalysis: caseAnalysis.data,
-        analyses: evidencePolicy.analyses,
-        evidences: evidence.data.evidences,
-        scratchpads: scratchpadBatch.data.scratchpads,
-        policyDropped: evidencePolicy.dropped,
-      }),
-    validateReportHandoff({
+  const report = await guardedExecution.run("buildReport", async () =>
+    buildReport({
+      caseAnalysis: caseAnalysis.data,
+      analyses: evidencePolicy.analyses,
       evidences: evidence.data.evidences,
       scratchpads: scratchpadBatch.data.scratchpads,
+      policyDropped: evidencePolicy.dropped,
     }),
   );
   if (report.isError) {
@@ -1069,16 +771,7 @@ export async function* runPipeline(
     type: "stage",
     event: recorder.record("REPORT_GENERATION", "Geração de Relatório", "COMPLETED", tRep, {
       ...reportDetail,
-      output: auditOutput(
-        { reportId: report.data.reportId, status: "READY" },
-        () => ({
-          report: report.data,
-          // O que a regra anti-alucinação de HU-25 removeu antes da tela, e por quê. Sem isto,
-          // "por que isso não aparece no relatório" só se responde relendo o código.
-          policyDropped: evidencePolicy.dropped,
-          verifiedEvidenceIds: evidencePolicy.verifiedEvidenceIds,
-        }),
-      ),
+      output: { reportId: report.data.reportId, status: "READY" },
       logs: [`[INFO] Relatório final consolidado e pronto para visualização.`],
     }),
   };

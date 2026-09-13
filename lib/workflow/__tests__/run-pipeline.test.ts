@@ -10,7 +10,6 @@ import type { GenerateStructuredParams, LlmProvider } from "../../llm/provider";
 import type { DataVeniaRepository } from "../../persistence/repository";
 import type { JurisprudenceProvider } from "../../providers/jurisprudence-provider";
 import type { JurisprudenceQuery } from "../../schemas/search.schema";
-import type { AuditLevel } from "../../config/audit";
 
 const CASE_ANALYSIS = {
   processNumber: "0009876-54.2025.8.16.0001",
@@ -132,7 +131,6 @@ function crossFileFromPrompt(prompt: string) {
 interface StubOptions {
   failOn?: string;
   scratchpadStatus?: "VALID" | "PARTIAL";
-  auditLevel?: AuditLevel;
 }
 
 function stubLlmProvider(options: StubOptions = {}): LlmProvider {
@@ -181,12 +179,7 @@ function stubLlmProvider(options: StubOptions = {}): LlmProvider {
   } as LlmProvider;
 }
 
-// Com dado pessoal de propósito: é o que permite verificar que a sanitização roda de fato antes da
-// primeira chamada de modelo (HU-05) e que o modo auditoria consegue mostrar o que ela mascarou.
 const PETITION = `EXCELENTÍSSIMO SENHOR DOUTOR JUIZ DE DIREITO
-
-Maria Aparecida Souza, brasileira, inscrita no CPF nº 123.456.789-01, residente e domiciliada
-na Rua das Acácias, nº 120, requerente nesta ação.
 
 A autora firmou contrato de plano de saúde e teve negada a cobertura de procedimento
 cirúrgico prescrito pelo médico assistente, sob alegação de exclusão contratual genérica.
@@ -215,7 +208,6 @@ async function collectEvents(
       repository,
       llmProvider: stubLlmProvider(options),
       jurisprudenceProvider: createFixtureProvider(),
-      auditLevel: options.auditLevel,
     },
   )) {
     events.push(event);
@@ -349,118 +341,6 @@ describe("runPipeline", () => {
     expect(logs.every((log) => log.traceId === "trace-test-0001")).toBe(true);
     expect(logs.map((log) => log.toolName)).toContain("analyzeCase");
     expect(logs.map((log) => log.toolName)).toContain("buildReport");
-  });
-  it("sem modo auditoria, cada nó emite só a contagem que sempre emitiu", async () => {
-    const { events } = await collectEvents();
-    const byId = new Map(
-      stageEvents(events)
-        .filter((event) => event.event.status !== "RUNNING")
-        .map((event) => [event.event.nodeDetail!.id, event.event.nodeDetail!]),
-    );
-
-    // O artefato nunca sai por engano: o default tem de ser indistinguível do comportamento antigo.
-    expect(Object.keys(byId.get("node-05-document-analysis")!.output as object)).toEqual([
-      "legalIssuesCount",
-      "factsCount",
-    ]);
-    expect(byId.get("node-04-sanitizing")!.output).not.toHaveProperty("sanitizedText");
-    expect(byId.get("node-09-cross-file-analysis")!.output).not.toHaveProperty("analyses");
-    expect(byId.get("node-11-report-generation")!.output).not.toHaveProperty("report");
-
-    // Sub-tarefas são material de auditoria: fora dela, nenhum nó as carrega.
-    expect([...byId.values()].every((node) => node.subTasks === undefined)).toBe(true);
-  });
-
-  it("em modo auditoria, cada nó carrega o artefato que produziu", async () => {
-    const { events } = await collectEvents({ auditLevel: "artifacts" });
-    const byId = new Map(
-      stageEvents(events)
-        .filter((event) => event.event.status !== "RUNNING")
-        .map((event) => [event.event.nodeDetail!.id, event.event.nodeDetail!]),
-    );
-
-    const caseOutput = byId.get("node-05-document-analysis")!.output as Record<string, unknown>;
-    expect(caseOutput.legalIssuesCount).toBe(1);
-    expect(caseOutput.caseAnalysis).toMatchObject({ court: "TJPR" });
-
-    expect((byId.get("node-04-sanitizing")!.output as Record<string, unknown>).spans).toBeDefined();
-    expect((byId.get("node-09-cross-file-analysis")!.output as Record<string, unknown>).analyses).toBeDefined();
-    expect((byId.get("node-10-evidence-verification")!.output as Record<string, unknown>).evidences).toBeDefined();
-    expect((byId.get("node-11-report-generation")!.output as Record<string, unknown>).report).toBeDefined();
-  });
-
-  it("em modo auditoria, busca, scratchpads e evidências viram sub-tarefas conferíveis", async () => {
-    const { events } = await collectEvents({ auditLevel: "artifacts" });
-    const byId = new Map(
-      stageEvents(events)
-        .filter((event) => event.event.status !== "RUNNING")
-        .map((event) => [event.event.nodeDetail!.id, event.event.nodeDetail!]),
-    );
-
-    // Uma sub-tarefa por query, com o total que a fonte declarou: é o que se compara com o portal.
-    const search = byId.get("node-07-search")!.subTasks!;
-    expect(search).toHaveLength(QUERY_PLAN.queries.length);
-    expect(search[0]!.output).toHaveProperty("totalCount");
-
-    const scratchpads = byId.get("node-08-scratchpad-generation")!.subTasks!;
-    expect(scratchpads.length).toBeGreaterThanOrEqual(3);
-
-    // Cada citação sai com o veredito ao lado — sem isso "N verificadas" não é conferível.
-    const evidences = byId.get("node-10-evidence-verification")!.subTasks!;
-    expect(evidences.length).toBeGreaterThan(0);
-    expect((evidences[0]!.output as Array<Record<string, unknown>>)[0]).toHaveProperty("matchKind");
-  });
-
-  it("em modo auditoria, as chamadas de modelo saem com system, prompt e modelo", async () => {
-    const { events } = await collectEvents({ auditLevel: "artifacts" });
-    const byId = new Map(
-      stageEvents(events)
-        .filter((event) => event.event.status !== "RUNNING")
-        .map((event) => [event.event.nodeDetail!.id, event.event.nodeDetail!]),
-    );
-
-    const call = byId.get("node-05-document-analysis")!.subTasks![0]!;
-    const input = call.input as Record<string, unknown>;
-    expect(input.model).toBe("stub-model");
-    expect(String(input.system)).toContain("assistente jurídico");
-    expect(String(input.prompt)).toContain("<documento>");
-
-    // Cada nó leva só as suas: o buffer é drenado a cada etapa, senão o cross-file apareceria
-    // carregando as chamadas de todas as anteriores.
-    expect(byId.get("node-06-query-generation")!.subTasks).toHaveLength(1);
-  });
-
-  it("o texto anterior à sanitização só sai no nível full", async () => {
-    const parcial = await collectEvents({ auditLevel: "artifacts" });
-    const completo = await collectEvents({ auditLevel: "full" });
-
-    const sanitizingOf = (events: PipelineEvent[]) =>
-      stageEvents(events).find(
-        (event) =>
-          event.event.nodeDetail?.id === "node-04-sanitizing" && event.event.status !== "RUNNING",
-      )!.event.nodeDetail!.output as Record<string, unknown>;
-
-    type Span = { original?: string };
-    const spansParciais = sanitizingOf(parcial.events).spans as Span[];
-    const spansCompletos = sanitizingOf(completo.events).spans as Span[];
-
-    expect(spansParciais.length).toBeGreaterThan(0);
-    expect(spansParciais.every((span) => span.original === undefined)).toBe(true);
-    expect(spansCompletos.some((span) => typeof span.original === "string")).toBe(true);
-  });
-
-  it("etapa que falha ainda entrega o prompt que produziu a saída recusada", async () => {
-    const { events } = await collectEvents({ auditLevel: "artifacts", failOn: "CrossFileAnalysis" });
-
-    const failed = stageEvents(events).find((event) => event.event.status === "FAILED")!;
-    expect(failed.event.nodeDetail!.id).toBe("node-09-cross-file-analysis");
-
-    // É o momento em que ver o prompt vale mais: sem isto, "saída estruturada inválida" chega sem
-    // o que foi pedido ao modelo.
-    const calls = failed.event.nodeDetail!.subTasks!;
-    expect(calls.length).toBeGreaterThan(0);
-    expect(String((calls[0]!.input as Record<string, unknown>).prompt)).toContain("<scratchpads>");
-    expect(calls.every((call) => call.status === "FAILED")).toBe(true);
   });
 });
 

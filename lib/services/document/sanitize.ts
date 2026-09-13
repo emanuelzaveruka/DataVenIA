@@ -1,29 +1,11 @@
 import { createAppError } from "../../errors/app-error";
 import { toolFailure, toolSuccess, type ToolResult } from "../../errors/tool-result";
-import type { RedactionSpan, RedactionSummary, RedactionType } from "../../schemas/sanitization.schema";
+import type { RedactionSummary, RedactionType } from "../../schemas/sanitization.schema";
 
 export interface SanitizeResult {
   sanitizedText: string;
   redactions: RedactionSummary[];
-  /**
-   * Ocorrência a ocorrência, só quando pedido (§14). Fora do modo auditoria nem é calculado — o
-   * caminho normal de HU-05 continua devolvendo apenas as contagens.
-   */
-  spans?: RedactionSpan[];
 }
-
-export interface SanitizeOptions {
-  /** Coleta uma entrada por ocorrência mascarada, com o contexto ao redor. */
-  collectSpans?: boolean;
-  /**
-   * Inclui o valor original em cada span. Só o nível `full` de `PIPELINE_AUDIT` liga isto, e o
-   * resultado nunca é persistido nem enviado a um modelo — é material de conferência manual.
-   */
-  includeOriginal?: boolean;
-}
-
-/** Janela de texto ao redor da ocorrência, o que torna o span conferível a olho. */
-const SPAN_CONTEXT_CHARS = 60;
 
 interface SimpleRedactor {
   type: RedactionType;
@@ -99,14 +81,6 @@ function bump(
   }
 }
 
-function contextAround(text: string, start: number, length: number): string {
-  const from = Math.max(0, start - SPAN_CONTEXT_CHARS);
-  const to = Math.min(text.length, start + length + SPAN_CONTEXT_CHARS);
-  const prefix = from > 0 ? "…" : "";
-  const suffix = to < text.length ? "…" : "";
-  return `${prefix}${text.slice(from, to).replace(/\s+/g, " ")}${suffix}`;
-}
-
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -115,56 +89,13 @@ function escapeRegExp(value: string): string {
  * Função pura (sem I/O) para facilitar teste isolado. Nunca retorna o dado original — apenas o
  * texto já mascarado e contagens por tipo/marcador (HU-05).
  */
-export function sanitizePersonalData(text: string, options: SanitizeOptions = {}): SanitizeResult {
+export function sanitizePersonalData(text: string): SanitizeResult {
   let sanitized = text;
   const counts = new Map<string, { type: RedactionType; marker: string; count: number }>();
-  const spans: RedactionSpan[] | undefined = options.collectSpans ? [] : undefined;
-
-  function span(
-    type: RedactionType,
-    marker: string,
-    original: string,
-    start: number,
-    haystack: string,
-  ): void {
-    spans?.push({
-      type,
-      marker,
-      start,
-      length: original.length,
-      context: contextAround(haystack, start, original.length),
-      original: options.includeOriginal ? original : undefined,
-    });
-  }
-
-  /**
-   * Uma substituição pode engolir marcadores já inseridos: "residente e domiciliada na
-   * [ENDEREÇO]" vira um único `[ENDEREÇO]`, e o trecho original, já mascarado, desaparece do
-   * texto. Sem descontar, o resumo passaria a declarar mais ocorrências do que o texto contém — e
-   * "o resumo diz que mascarou" é exatamente o que HU-05 não pode afirmar sem lastro.
-   */
-  function absorbMarkers(replaced: string): void {
-    for (const [key, entry] of counts) {
-      let index = replaced.indexOf(entry.marker);
-      while (index !== -1) {
-        entry.count -= 1;
-        if (entry.count <= 0) counts.delete(key);
-
-        const absorbed = spans?.findLastIndex((candidate) => candidate.marker === entry.marker);
-        if (absorbed !== undefined && absorbed >= 0) spans!.splice(absorbed, 1);
-
-        index = replaced.indexOf(entry.marker, index + entry.marker.length);
-      }
-    }
-  }
 
   for (const redactor of SIMPLE_REDACTORS) {
-    // O `offset` vem do próprio `replace`: nenhum dos padrões simples tem grupo de captura, então a
-    // assinatura do callback é (match, offset, texto).
-    sanitized = sanitized.replace(redactor.pattern, (match: string, offset: number, haystack: string) => {
-      absorbMarkers(match);
+    sanitized = sanitized.replace(redactor.pattern, () => {
       bump(counts, redactor.type, redactor.marker);
-      span(redactor.type, redactor.marker, match, offset, haystack);
       return redactor.marker;
     });
   }
@@ -186,16 +117,14 @@ export function sanitizePersonalData(text: string, options: SanitizeOptions = {}
         : "[PARTE]";
     nameToMarker.set(name, marker);
     bump(counts, "PARTY_NAME", marker);
-    span("PARTY_NAME", marker, name, offset + fullMatch.indexOf(name), sanitized);
     return fullMatch.replace(name, marker);
   });
 
   for (const [name, marker] of nameToMarker) {
     const wholeNameRegex = new RegExp(`\\b${escapeRegExp(name)}\\b`, "g");
-    sanitized = sanitized.replace(wholeNameRegex, (match: string, offset: number, haystack: string) => {
+    sanitized = sanitized.replace(wholeNameRegex, (match) => {
       if (match === marker) return match;
       bump(counts, "PARTY_NAME", marker);
-      span("PARTY_NAME", marker, match, offset, haystack);
       return marker;
     });
   }
@@ -203,7 +132,6 @@ export function sanitizePersonalData(text: string, options: SanitizeOptions = {}
   return {
     sanitizedText: sanitized,
     redactions: Array.from(counts.values()),
-    spans,
   };
 }
 
@@ -216,16 +144,10 @@ export function sanitizePersonalData(text: string, options: SanitizeOptions = {}
 export function sanitizeDocument(
   documentId: string,
   text: string,
-  options: SanitizeOptions = {},
-): ToolResult<{
-  documentId: string;
-  sanitizedText: string;
-  redactions: RedactionSummary[];
-  spans?: RedactionSpan[];
-}> {
+): ToolResult<{ documentId: string; sanitizedText: string; redactions: RedactionSummary[] }> {
   try {
-    const { sanitizedText, redactions, spans } = sanitizePersonalData(text, options);
-    return toolSuccess({ documentId, sanitizedText, redactions, spans });
+    const { sanitizedText, redactions } = sanitizePersonalData(text);
+    return toolSuccess({ documentId, sanitizedText, redactions });
   } catch (cause) {
     return toolFailure(
       createAppError({
