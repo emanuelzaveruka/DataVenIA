@@ -178,7 +178,9 @@ export function UploadForm() {
           </form>
 
           {displayProgress && (
-            <Cartao className="overflow-hidden">
+            // sem `overflow-hidden`: o painel do HelpHint e absolute e estoura o card de
+            // proposito — recortar aqui esconderia justamente a explicacao da etapa.
+            <Cartao>
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-vn-borda px-6 py-5">
                 <Rotulo>Execução do pipeline</Rotulo>
                 <Marcador tom={hasFailure ? "improcedente" : isSubmitting ? "parcial" : "procedente"}>

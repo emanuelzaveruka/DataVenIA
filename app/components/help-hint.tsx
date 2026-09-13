@@ -79,7 +79,7 @@ export function HelpHint({
             close();
           }
         }}
-        className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-ink-500 text-[10px] font-semibold leading-none text-ink-600 transition-colors hover:border-ink-900 hover:text-ink-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-green dark:text-ink-400 dark:hover:border-ink-050 dark:hover:text-ink-050"
+        className="flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded-full border border-vn-navy-400 text-[10px] leading-none font-semibold text-vn-texto-suave transition-colors ease-vn hover:border-vn-acao hover:text-vn-acao"
       >
         <span aria-hidden="true">?</span>
       </button>
@@ -88,12 +88,12 @@ export function HelpHint({
         <span
           id={panelId}
           role="tooltip"
-          className="absolute left-0 top-full z-20 mt-1.5 block w-[min(20rem,calc(100vw-2.5rem))] rounded-lg border border-ink-300 bg-ink-100 p-3 text-left text-xs font-normal leading-relaxed text-ink-900 shadow-lg dark:border-ink-700 dark:bg-ink-800 dark:text-ink-050"
+          className="absolute top-full left-0 z-50 mt-1.5 block w-[min(20rem,calc(100vw-2.5rem))] rounded-card border border-vn-borda border-l-[3px] border-l-vn-acao bg-vn-superficie p-4 text-left text-legenda leading-relaxed font-normal text-vn-texto shadow-[0_8px_24px_rgba(16,36,61,0.16)]"
         >
           <span className="block font-semibold">{entry.term}</span>
           <span className="mt-1 block">{entry.what}</span>
           {stateNote && (
-            <span className="mt-2 block border-t border-ink-300 pt-2 text-ink-600 dark:border-ink-700 dark:text-ink-400">
+            <span className="mt-2.5 block border-t border-vn-borda pt-2.5 text-vn-texto-suave">
               {stateNote}
             </span>
           )}
