@@ -67,6 +67,24 @@ Faça em um navegador comum, logado em nada, sem extensão de automação.
    em `lib/providers/fixtures/`, conferindo antes que não há dado pessoal de parte.
 9. **Preencher as duas seções abaixo** e atualizar o Status no topo.
 
+## O que o código já está esperando desta inspeção
+
+Duas informações do item 4 destravam a paginação imediatamente, sem mais nenhuma mudança de código
+(`lib/providers/tjpr.ts`, `DEFAULT_TJPR_PAGINATION`):
+
+| O que anotar no DevTools | Onde entra | Hoje |
+|---|---|---|
+| nome do parâmetro de página | `pageParam` / `TJPR_PAGE_PARAM` | vazio — a busca traz 1 página só |
+| nome do parâmetro de tamanho de página | `pageSizeParam` / `TJPR_PAGE_SIZE_PARAM` | vazio |
+| a primeira página é `0` ou `1`? | `firstPageIndex` / `TJPR_FIRST_PAGE_INDEX` | assume `1` |
+| quantos itens vêm por página por padrão | `SEARCH_PAGE_SIZE` em `lib/config/limits.ts` | assume `20` |
+
+Para testar um achado sem recompilar, basta exportar as variáveis e rodar com
+`JURISPRUDENCE_PROVIDER=tjpr PIPELINE_AUDIT=artifacts`: o campo `pagesFetched` de cada busca em
+`07-busca/` diz se o portal aceitou o parâmetro. Continuar em `pagesFetched: 1` com
+`SEARCH_MAX_PAGES = 3` significa que o nome está errado — o código detecta que a página seguinte
+não trouxe nada novo e para, em vez de contar a mesma página três vezes.
+
 ## Achados
 
 - Data da inspeção: 2026-09-12.

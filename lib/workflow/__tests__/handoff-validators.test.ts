@@ -32,7 +32,7 @@ describe("validateSanitizationHandoff (HU-05/HU-06)", () => {
     ],
   };
 
-  const validate = validateSanitizationHandoff({ documentId: "doc-1" });
+  const validate = validateSanitizationHandoff({ documentId: "doc-1", allowRawOriginals: false });
 
   it("accepts a payload whose markers are all present in the sanitized text", () => {
     expect(validate(sanitized)).toBeUndefined();
@@ -64,6 +64,26 @@ describe("validateSanitizationHandoff (HU-05/HU-06)", () => {
     ).toBeUndefined();
   });
 
+  it("rejects spans carrying the original value outside the audit level that allows it", () => {
+    const withOriginal = {
+      ...sanitized,
+      spans: [
+        {
+          type: "CPF_CNPJ" as const,
+          marker: "[CPF/CNPJ]",
+          start: 10,
+          length: 14,
+          context: "CPF 123.456.789-01 do autor",
+          original: "123.456.789-01",
+        },
+      ],
+    };
+
+    expectViolation(validate(withOriginal), /valor original/);
+    expect(
+      validateSanitizationHandoff({ documentId: "doc-1", allowRawOriginals: true })(withOriginal),
+    ).toBeUndefined();
+  });
 });
 
 describe("validateScratchpadBatchHandoff (HU-17/HU-19)", () => {

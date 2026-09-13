@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getLlmProvider } from "../../../lib/llm/get-llm-provider";
 import { getJurisprudenceProvider } from "../../../lib/providers/get-jurisprudence-provider";
 import { getRepository } from "../../../lib/persistence/get-repository";
+import { getAuditLevel } from "../../../lib/config/audit";
 import { statusForError } from "../../../lib/errors/http-status";
 import type { AppError } from "../../../lib/errors/app-error";
 import {
@@ -59,6 +60,15 @@ export async function POST(request: Request) {
   }
 
   const jurisprudenceProvider = getJurisprudenceProvider();
+
+  // Também antes do primeiro byte: `PIPELINE_AUDIT` mal escrito é erro de configuração, e descobrir
+  // isso no fim de uma execução inteira seria pior do que recusar agora.
+  let auditLevel;
+  try {
+    auditLevel = getAuditLevel();
+  } catch (cause) {
+    return errorResponse(pipelineUnexpectedError("getAuditLevel", cause));
+  }
 
   const formData = await request.formData();
   const file = formData.get("file");
@@ -142,7 +152,14 @@ export async function POST(request: Request) {
             extraTerms,
             filters,
           },
-          { repository, llmProvider, crossFileLlmProvider, jurisprudenceProvider, signal: controller.signal },
+          {
+            repository,
+            llmProvider,
+            crossFileLlmProvider,
+            jurisprudenceProvider,
+            signal: controller.signal,
+            auditLevel,
+          },
         )) {
           write(event);
         }

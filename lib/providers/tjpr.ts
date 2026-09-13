@@ -2,14 +2,70 @@ import { createAppError } from "../errors/app-error";
 import { toolFailure, toolSuccess, type ToolResult } from "../errors/tool-result";
 import type { JurisprudenceQuery, JurisprudenceSearchItem, JurisprudenceSearchResult, RawDecision } from "../schemas/search.schema";
 import type { JurisprudenceProvider } from "./jurisprudence-provider";
+import {
+  SEARCH_COLLECTED_ITEMS_CAP,
+  SEARCH_MAX_PAGES,
+  SEARCH_PAGE_SIZE,
+} from "../config/limits";
 
 const DEFAULT_TJPR_BASE_URL = "https://portal.tjpr.jus.br";
 const TJPR_ACCEPT_HEADER = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
 const PROCESS_NUMBER_PATTERN = /\d{7}-\d{2}\.\d{4}\.\d{1}\.\d{2}\.\d{4}/;
 
+/**
+ * Como pedir a página seguinte ao portal.
+ *
+ * **`pageParam` está vazio de propósito.** O nome do parâmetro de paginação do
+ * `pesquisa.do` não é conhecido pelo código: `docs/tjpr-portal-validacao.md` lista exatamente isto
+ * como pendente de inspeção manual no DevTools (HU-38), e §9/`docs/escopo.md` proíbem descobri-lo
+ * por tentativa e erro contra o portal. Chutar seria pior do que não paginar: um parâmetro
+ * desconhecido é ignorado pelo servidor, que devolve a página 1 de novo — e o pipeline acharia que
+ * coletou três páginas quando coletou a mesma três vezes.
+ *
+ * Enquanto estiver vazio, `search()` busca só a primeira página e diz isso em `pagesFetched`.
+ * Para ligar a paginação basta preencher os dois nomes — aqui ou, para testar sem recompilar,
+ * pelas variáveis `TJPR_PAGE_PARAM` e `TJPR_PAGE_SIZE_PARAM`.
+ */
+export interface TjprPaginationConfig {
+  /** Nome do parâmetro de página (ex.: `pagina`, `pageNumber`, `numPagina` — a confirmar). */
+  pageParam?: string;
+  /** Nome do parâmetro de tamanho de página (a interface do portal oferece 20 e 50). */
+  pageSizeParam?: string;
+  /** Índice da primeira página: 1 na maioria dos portais, 0 em alguns. */
+  firstPageIndex: number;
+  pageSize: number;
+  maxPages: number;
+  /** Teto de itens coletados, somando todas as páginas. */
+  itemsCap: number;
+}
+
+export const DEFAULT_TJPR_PAGINATION: TjprPaginationConfig = {
+  pageParam: undefined,
+  pageSizeParam: undefined,
+  firstPageIndex: 1,
+  pageSize: SEARCH_PAGE_SIZE,
+  maxPages: SEARCH_MAX_PAGES,
+  itemsCap: SEARCH_COLLECTED_ITEMS_CAP,
+};
+
+/** Lê os dois nomes pendentes do ambiente, para testar o achado do DevTools sem tocar no código. */
+export function paginationFromEnv(
+  env: Partial<NodeJS.ProcessEnv> = process.env,
+  base: TjprPaginationConfig = DEFAULT_TJPR_PAGINATION,
+): TjprPaginationConfig {
+  const firstPageIndex = Number.parseInt(env.TJPR_FIRST_PAGE_INDEX ?? "", 10);
+  return {
+    ...base,
+    pageParam: env.TJPR_PAGE_PARAM?.trim() || base.pageParam,
+    pageSizeParam: env.TJPR_PAGE_SIZE_PARAM?.trim() || base.pageSizeParam,
+    firstPageIndex: Number.isFinite(firstPageIndex) ? firstPageIndex : base.firstPageIndex,
+  };
+}
+
 interface TjprProviderOptions {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
+  pagination?: TjprPaginationConfig;
 }
 
 function providerError(params: {
@@ -135,7 +191,11 @@ function toBrazilianDate(value: string | undefined): string | undefined {
   return `${match[3]}/${match[2]}/${match[1]}`;
 }
 
-function buildSearchUrl(query: JurisprudenceQuery, baseUrl: string): string {
+function buildSearchUrl(
+  query: JurisprudenceQuery,
+  baseUrl: string,
+  pagination?: { config: TjprPaginationConfig; page: number },
+): string {
   const url = new URL("/jurisprudencia/publico/pesquisa.do", baseUrl);
   url.searchParams.set("actionType", "pesquisar");
   url.searchParams.set("criterioPesquisa", query.query);
@@ -155,6 +215,18 @@ function buildSearchUrl(query: JurisprudenceQuery, baseUrl: string): string {
   }
   if (query.filters?.judge) {
     url.searchParams.set("nomeRelator", query.filters.judge);
+  }
+
+  // Só entra na URL quando o nome do parâmetro é conhecido. Sem ele, a única página pedível é a
+  // que o portal serve por padrão — e é melhor buscar uma página honestamente do que três iguais.
+  if (pagination?.config.pageSizeParam) {
+    url.searchParams.set(pagination.config.pageSizeParam, String(pagination.config.pageSize));
+  }
+  if (pagination?.config.pageParam) {
+    url.searchParams.set(
+      pagination.config.pageParam,
+      String(pagination.config.firstPageIndex + pagination.page),
+    );
   }
 
   return url.toString();
@@ -265,6 +337,7 @@ function parseDecisionHtml(id: string, html: string, sourceUrl: string): RawDeci
 export function createTjprProvider(options: TjprProviderOptions = {}): JurisprudenceProvider {
   const baseUrl = options.baseUrl ?? DEFAULT_TJPR_BASE_URL;
   const fetchImpl = options.fetchImpl ?? fetch;
+  const pagination = options.pagination ?? DEFAULT_TJPR_PAGINATION;
   const knownDecisionUrls = new Map<string, string>();
 
   return {
@@ -272,16 +345,46 @@ export function createTjprProvider(options: TjprProviderOptions = {}): Jurisprud
 
     async search(query: JurisprudenceQuery): Promise<ToolResult<JurisprudenceSearchResult>> {
       const startedAt = Date.now();
-      const url = buildSearchUrl(query, baseUrl);
-      const html = await fetchHtml(fetchImpl, url, "tjpr.search");
-      if (html.isError) return html;
+      const firstUrl = buildSearchUrl(query, baseUrl, { config: pagination, page: 0 });
+      // Sem o nome do parâmetro de página, pedir a página 2 devolveria a 1 de novo: uma página é o
+      // máximo honesto. Com ele, o teto é o menor entre maxPages e o teto de itens coletados.
+      const maxPages = pagination.pageParam ? pagination.maxPages : 1;
 
-      const result = parseSearchHtml(html.data, baseUrl);
-      for (const item of result.items) {
-        knownDecisionUrls.set(item.id, item.url);
+      const items: JurisprudenceSearchItem[] = [];
+      const seen = new Set<string>();
+      let totalCount = 0;
+      let pagesFetched = 0;
+
+      for (let page = 0; page < maxPages; page += 1) {
+        const url = page === 0 ? firstUrl : buildSearchUrl(query, baseUrl, { config: pagination, page });
+        const html = await fetchHtml(fetchImpl, url, "tjpr.search");
+        // Falha na primeira página é falha da busca; numa página seguinte, é motivo para parar com
+        // o que já veio — descartar duas páginas boas por causa da terceira seria pior.
+        if (html.isError) {
+          if (page === 0) return html;
+          break;
+        }
+
+        const parsed = parseSearchHtml(html.data, baseUrl);
+        pagesFetched += 1;
+        totalCount = Math.max(totalCount, parsed.totalCount);
+
+        const novos = parsed.items.filter((item) => !seen.has(item.id));
+        for (const item of novos) {
+          seen.add(item.id);
+          items.push(item);
+          knownDecisionUrls.set(item.id, item.url);
+        }
+
+        // Página que não trouxe nada novo significa que o portal ignorou o parâmetro de paginação
+        // (ou que acabaram os resultados). Insistir só gastaria requisição contra a mesma página.
+        if (novos.length === 0 || items.length >= pagination.itemsCap) break;
       }
 
-      return toolSuccess(result, { source: "tjpr", durationMs: Date.now() - startedAt });
+      return toolSuccess(
+        { items: items.slice(0, pagination.itemsCap), totalCount: totalCount || items.length },
+        { source: "tjpr", durationMs: Date.now() - startedAt, url: firstUrl, pagesFetched },
+      );
     },
 
     async fetchDecision(decisionId: string): Promise<ToolResult<RawDecision>> {
@@ -305,6 +408,7 @@ export function createTjprProvider(options: TjprProviderOptions = {}): Jurisprud
       return toolSuccess(parseDecisionHtml(decisionId, html.data, sourceUrl), {
         source: "tjpr",
         durationMs: Date.now() - startedAt,
+        url: sourceUrl,
       });
     },
   };

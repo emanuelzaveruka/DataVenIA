@@ -9,7 +9,7 @@ apresenta probabilidade de êxito. Toda afirmação do relatório carrega a cita
 conferida contra o texto original da decisão — e afirmação sem essa conferência é removida antes
 de chegar à tela.
 
-**Começando pelo funcionamento:** [`docs/como-funciona.html`](docs/como-funciona.html) explica, em
+**Começando pelo funcionamento:** [`public/como-funciona.html`](public/como-funciona.html) (servido em `/como-funciona.html`) explica, em
 uma página pronta para virar PDF (abra no navegador e use `Cmd+P` → *Salvar como PDF*), o que cada
 uma das 11 etapas recebe, faz e devolve, quais delas chamam um modelo de linguagem — são quatro — e
 com que prompt exatamente elas o chamam.
@@ -160,10 +160,37 @@ npm run build      # build de produção
 npm test           # suíte de testes (Vitest) — roda sem rede e sem banco
 npm run typecheck  # checagem de tipos (tsc --noEmit)
 npm run lint       # ESLint
+npm run watch:run -- caso.pdf          # acompanha uma execução pelo terminal
+npm run watch:run -- caso.pdf --out runs   # e grava o que cada etapa produziu
 ```
 
 Toda a suíte roda sem credencial e sem conectividade: providers de LLM, de jurisprudência e de
 storage são injetados, e os testes usam implementações locais.
+
+### Conferir uma execução à mão (modo auditoria)
+
+Por padrão cada etapa reporta só quantos itens produziu — o suficiente para acompanhar, insuficiente
+para validar. Com `PIPELINE_AUDIT` ligado no servidor, cada etapa passa a emitir o artefato em si e
+os prompts que enviou:
+
+```bash
+PIPELINE_AUDIT=full npm run dev
+npm run watch:run -- caso.pdf --out runs
+```
+
+A pasta `runs/<runId>/` fica com um arquivo por etapa — texto extraído página a página, diff de
+redação, análise do caso, queries, uma busca por arquivo com a **URL exata** consultada no portal,
+um Scratchpad por decisão, a análise cruzada, o veredito de cada citação e o relatório — mais
+`prompts/`, com o system e o prompt de cada chamada de modelo, inclusive as tentativas que
+falharam. Comece pelo `RESUMO.md`: ele diz, etapa a etapa, o que dá para conferir e onde.
+
+São dois níveis: `artifacts` expõe tudo já sanitizado; `full` acrescenta o texto do documento
+anterior à sanitização, que é o único dado pessoal não mascarado que sai do processo — e mesmo nele
+nada é persistido nem enviado a um modelo. Fora do modo auditoria o pipeline se comporta exatamente
+como antes; é o servidor que decide, não o cliente.
+
+Os mesmos artefatos aparecem ao vivo no inspector de execução da própria tela, nas abas
+Output/Sub-Workers de cada nó.
 
 ## Deploy (Vercel)
 

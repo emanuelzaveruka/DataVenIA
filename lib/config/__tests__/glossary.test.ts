@@ -8,11 +8,11 @@ import { GLOSSARY, PROGRESS_GLOSSARY_KEYS, type GlossaryEntry, type GlossaryKey 
 const entries = Object.entries(GLOSSARY) as [GlossaryKey, GlossaryEntry][];
 import { buildPipelineProgress } from "../../observability/pipeline-progress";
 
-const DOC_PATH = join(process.cwd(), "docs", "como-funciona.html");
+const DOC_PATH = join(process.cwd(), "public", "como-funciona.html");
 
 /**
  * O glossário é lido em três lugares (painel de progresso, relatório e o PDF de
- * `docs/como-funciona.html`). Estes testes existem para que os três não divirjam em silêncio: uma
+ * `public/como-funciona.html`). Estes testes existem para que os três não divirjam em silêncio: uma
  * explicação que descreve uma etapa que não existe mais é pior do que etapa sem explicação.
  */
 describe("glossário de ajuda contextual", () => {
@@ -48,7 +48,7 @@ describe("glossário de ajuda contextual", () => {
     }
   });
 
-  it("tem todo termo documentado em docs/como-funciona.html", () => {
+  it("tem todo termo documentado em public/como-funciona.html", () => {
     const doc = readFileSync(DOC_PATH, "utf8");
 
     for (const [key, entry] of entries) {

@@ -138,3 +138,135 @@ describe("TjprProvider", () => {
     }
   });
 });
+
+describe("TjprProvider — paginação (HU-13/HU-38)", () => {
+  /** Uma linha de resultado por id, para distinguir páginas diferentes nas asserções. */
+  function pageHtml(ids: string[], total = 62): string {
+    const rows = ids
+      .map(
+        (id) => `
+    <tr class="even">
+      <td>
+        <input type="checkbox" name="idsSelecionados" value="${id}">
+        <a href="/jurisprudencia/j/${id}/caso-0018288-78.2024.8.16.0019">0018288-78.2024.8.16.0019</a>
+        Data Julgamento: 16/05/2025
+      </td>
+      <td class="juris-tabela-ementa">Plano de saúde. Cobertura de exame.</td>
+    </tr>`,
+      )
+      .join("");
+    return `<html><body><td>${total} registro(s) encontrado(s)</td>${rows}</body></html>`;
+  }
+
+  const PAGINATION = {
+    pageParam: "pagina",
+    pageSizeParam: "tamanhoPagina",
+    firstPageIndex: 1,
+    pageSize: 20,
+    maxPages: 3,
+    itemsCap: 60,
+  };
+
+  it("busca só uma página enquanto o parâmetro de paginação for desconhecido", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => htmlResponse(pageHtml(["1", "2"])));
+    const provider = createTjprProvider({ baseUrl: "https://portal.tjpr.jus.br", fetchImpl });
+
+    const result = await provider.search({ query: "plano de saude" });
+
+    // Sem o nome do parâmetro (HU-38 pendente), pedir a página 2 devolveria a 1 de novo — e o
+    // pipeline acharia que coletou três páginas tendo coletado a mesma três vezes.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.isError).toBe(false);
+    if (result.isError) return;
+    expect(result.metadata?.pagesFetched).toBe(1);
+  });
+
+  it("com o parâmetro configurado, percorre as páginas e junta os resultados", async () => {
+    const pages = [pageHtml(["1", "2"]), pageHtml(["3", "4"]), pageHtml(["5", "6"])];
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const page = Number(new URL(String(input)).searchParams.get("pagina"));
+      return htmlResponse(pages[page - 1]!);
+    });
+    const provider = createTjprProvider({
+      baseUrl: "https://portal.tjpr.jus.br",
+      fetchImpl,
+      pagination: PAGINATION,
+    });
+
+    const result = await provider.search({ query: "plano de saude" });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(result.isError).toBe(false);
+    if (result.isError) return;
+    expect(result.data.items.map((item) => item.id)).toEqual(["1", "2", "3", "4", "5", "6"]);
+    expect(result.data.totalCount).toBe(62);
+    expect(result.metadata?.pagesFetched).toBe(3);
+  });
+
+  it("para de paginar quando a página não traz nada novo", async () => {
+    // É o que acontece se o portal ignorar o parâmetro: devolve sempre a mesma página.
+    const fetchImpl = vi.fn<typeof fetch>(async () => htmlResponse(pageHtml(["1", "2"])));
+    const provider = createTjprProvider({
+      baseUrl: "https://portal.tjpr.jus.br",
+      fetchImpl,
+      pagination: PAGINATION,
+    });
+
+    const result = await provider.search({ query: "plano de saude" });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(result.isError).toBe(false);
+    if (result.isError) return;
+    expect(result.data.items).toHaveLength(2);
+  });
+
+  it("falha numa página seguinte preserva o que já veio", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const page = Number(new URL(String(input)).searchParams.get("pagina"));
+      return page === 1 ? htmlResponse(pageHtml(["1", "2"])) : htmlResponse("erro", 500);
+    });
+    const provider = createTjprProvider({
+      baseUrl: "https://portal.tjpr.jus.br",
+      fetchImpl,
+      pagination: PAGINATION,
+    });
+
+    const result = await provider.search({ query: "plano de saude" });
+
+    // Descartar duas páginas boas por causa da terceira seria pior do que seguir com o que veio.
+    expect(result.isError).toBe(false);
+    if (result.isError) return;
+    expect(result.data.items).toHaveLength(2);
+    expect(result.metadata?.pagesFetched).toBe(1);
+  });
+
+  it("falha na primeira página continua sendo falha da busca", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => htmlResponse("erro", 500));
+    const provider = createTjprProvider({
+      baseUrl: "https://portal.tjpr.jus.br",
+      fetchImpl,
+      pagination: PAGINATION,
+    });
+
+    expect((await provider.search({ query: "plano de saude" })).isError).toBe(true);
+  });
+
+  it("respeita o teto de itens coletados mesmo com páginas sobrando", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const page = Number(new URL(String(input)).searchParams.get("pagina"));
+      return htmlResponse(pageHtml([`${page}a`, `${page}b`, `${page}c`]));
+    });
+    const provider = createTjprProvider({
+      baseUrl: "https://portal.tjpr.jus.br",
+      fetchImpl,
+      pagination: { ...PAGINATION, itemsCap: 4 },
+    });
+
+    const result = await provider.search({ query: "plano de saude" });
+
+    expect(result.isError).toBe(false);
+    if (result.isError) return;
+    expect(result.data.items).toHaveLength(4);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+});

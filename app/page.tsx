@@ -78,6 +78,13 @@ export default function Home() {
             >
               Ver relatório de exemplo →
             </Link>
+            {/* Arquivo estático, não uma rota: `Link` faria o roteador do Next tentar navegar por ele. */}
+            <a
+              href="/como-funciona.html"
+              className="inline-flex items-center px-2 py-3 text-apoio font-semibold text-vn-verde-400 hover:text-vn-verde-300 hover:underline"
+            >
+              Como funciona, etapa a etapa →
+            </a>
           </div>
 
           <p className="mt-5 text-rotulo text-vn-navy-300">

@@ -2,7 +2,7 @@ import type { JurisprudenceProvider } from "./jurisprudence-provider";
 import { createCircuitBreaker } from "../errors/circuit-breaker";
 import { createFixtureProvider } from "./fixture";
 import { createResilientJurisprudenceProvider } from "./resilient-jurisprudence-provider";
-import { createTjprProvider } from "./tjpr";
+import { createTjprProvider, paginationFromEnv } from "./tjpr";
 
 const JURISPRUDENCE_PROVIDER_NAMES = ["fixture", "tjpr"] as const;
 type JurisprudenceProviderName = (typeof JURISPRUDENCE_PROVIDER_NAMES)[number];
@@ -28,7 +28,7 @@ export function getJurisprudenceProvider(env: Partial<NodeJS.ProcessEnv> = proce
 
   if (configuredProvider === "tjpr") {
     return createResilientJurisprudenceProvider(
-      createTjprProvider({ baseUrl: env.TJPR_BASE_URL }),
+      createTjprProvider({ baseUrl: env.TJPR_BASE_URL, pagination: paginationFromEnv(env) }),
       createFixtureProvider(),
       createCircuitBreaker(),
     );

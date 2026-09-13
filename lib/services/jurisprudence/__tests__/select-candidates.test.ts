@@ -25,15 +25,30 @@ describe("selectForScratchpad (HU-16)", () => {
     }
   });
 
-  it("selects at most scratchpadLimit decisions out of 30 ranked candidates", () => {
-    const ranked = Array.from({ length: 30 }, (_, i) => fakeCandidate(`item-${i}`, 30 - i, "1ª Câmara Cível"));
+  it("corta no scratchpadLimit quando há candidatos de sobra", () => {
+    const excedente = SCRATCHPAD_LIMIT + 10;
+    const ranked = Array.from({ length: excedente }, (_, i) =>
+      fakeCandidate(`item-${i}`, excedente - i, "1ª Câmara Cível"),
+    );
 
     const result = selectForScratchpad(ranked);
 
     expect(result.isError).toBe(false);
     if (!result.isError) {
-      expect(result.data.length).toBeLessThanOrEqual(SCRATCHPAD_LIMIT);
-      expect(result.data.length).toBe(SCRATCHPAD_LIMIT);
+      expect(result.data).toHaveLength(SCRATCHPAD_LIMIT);
+    }
+  });
+
+  it("seleciona todos quando há menos candidatos que o limite", () => {
+    // Desde 2026-09-13 `SCRATCHPAD_LIMIT` é o próprio teto do pré-ranking (`docs/escopo.md`): a
+    // seleção deixou de ser um segundo corte e o caso normal passou a ser "analisa tudo que veio".
+    const ranked = Array.from({ length: 7 }, (_, i) => fakeCandidate(`item-${i}`, 7 - i, "1ª Câmara Cível"));
+
+    const result = selectForScratchpad(ranked);
+
+    expect(result.isError).toBe(false);
+    if (!result.isError) {
+      expect(result.data).toHaveLength(7);
     }
   });
 

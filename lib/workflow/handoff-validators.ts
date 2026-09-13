@@ -1,6 +1,6 @@
 import { createAppError, type AppError } from "../errors/app-error";
 import type { ToolResultValidator } from "../hooks/post-tool-use";
-import type { RedactionSummary } from "../schemas/sanitization.schema";
+import type { RedactionSpan, RedactionSummary } from "../schemas/sanitization.schema";
 import type { DecisionScratchpad } from "../schemas/scratchpad.schema";
 import type { VerifiedEvidence } from "../schemas/evidence.schema";
 import type { FinalReport } from "../schemas/report.schema";
@@ -61,6 +61,7 @@ export interface SanitizationHandoff {
   documentId: string;
   sanitizedText: string;
   redactions: RedactionSummary[];
+  spans?: RedactionSpan[];
 }
 
 /**
@@ -78,9 +79,13 @@ export interface SanitizationHandoff {
  * segundo absorver o marcador que o primeiro inseriu (é o que acontece com um endereço dentro de
  * "residente e domiciliado em ..."), então `count` pode legitimamente superar o número de
  * marcadores visíveis. O que nunca pode acontecer é um tipo contado sem nenhum marcador no texto.
+ *
+ * `allowRawOriginals` espelha o nível `full` de `PIPELINE_AUDIT`: fora dele, nenhum span pode
+ * carregar o valor original — é o único campo do projeto com dado pessoal não mascarado.
  */
 export function validateSanitizationHandoff(expected: {
   documentId: string;
+  allowRawOriginals: boolean;
 }): ToolResultValidator<SanitizationHandoff> {
   return (data) => {
     const problems: string[] = [];
@@ -104,6 +109,16 @@ export function validateSanitizationHandoff(expected: {
         problems.push(
           `o resumo declara ${claimed} ocorrência(s) mascarada(s) com "${marker}", ` +
           "mas o marcador não aparece no texto sanitizado",
+        );
+      }
+    }
+
+    if (!expected.allowRawOriginals) {
+      const withOriginal = (data.spans ?? []).filter((span) => span.original !== undefined);
+      if (withOriginal.length > 0) {
+        problems.push(
+          `${withOriginal.length} ocorrência(s) carregam o valor original fora do nível de ` +
+          "auditoria que autoriza expô-lo",
         );
       }
     }
