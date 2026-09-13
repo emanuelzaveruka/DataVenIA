@@ -32,11 +32,7 @@ import type { DataVeniaRepository } from "../persistence/repository";
 import type { LlmProvider } from "../llm/provider";
 import type { JurisprudenceProvider } from "../providers/jurisprudence-provider";
 import type { FinalReport } from "../schemas/report.schema";
-import { RedactionSummarySchema, type RedactionSummary } from "../schemas/sanitization.schema";
-import type { SearchQuery } from "../schemas/query-generation.schema";
-import type { SearchPlan, SearchPlanProposal } from "../schemas/search-plan.schema";
-import type { CaseAnalysis } from "../schemas/case-analysis.schema";
-import type { JurisprudenceQueryFilters } from "../schemas/search.schema";
+import type { RedactionSummary } from "../schemas/sanitization.schema";
 
 const INITIAL_STAGE = "DOCUMENT_ANALYSIS" as const;
 
@@ -65,36 +61,11 @@ export interface PipelineFileInput {
   bytes: Buffer;
 }
 
-/**
- * Tudo que a segunda metade do pipeline (busca → relatório) precisa da primeira.
- *
- * Existe para que o checkpoint humano não custe uma duplicação: com ela, retomar a execução é
- * preencher esta estrutura a partir do banco em vez de reexecutar parse, sanitização e as duas
- * chamadas de modelo que já rodaram.
- */
-interface PlanningArtifacts {
-  documentId: string;
-  fileName: string;
-  mimeType: string;
-  metadata: { pageCount?: number; hash: string };
-  sanitizedText: string;
-  redactions: RedactionSummary[];
-  caseAnalysis: CaseAnalysis;
-  queries: SearchQuery[];
-  filters?: JurisprudenceQueryFilters;
+export interface RunPipelineInput {
+  runId: string;
+  traceId: string;
+  file: PipelineFileInput;
 }
-
-/**
- * Duas formas de entrar no pipeline, nunca as duas ao mesmo tempo — daí a união discriminada em
- * vez de campos opcionais soltos:
- *
- * - **envio**: `file` obrigatório. Com `pauseAfterQueries`, a execução para depois de gerar as
- *   queries e devolve a proposta para o usuário revisar (o checkpoint de HU-11 na tela).
- * - **retomada**: sem arquivo. O `plan` é o que o usuário aprovou, e o resto vem de `loadRun`.
- */
-export type RunPipelineInput =
-  | { runId: string; traceId: string; file: PipelineFileInput; pauseAfterQueries?: boolean }
-  | { runId: string; traceId: string; resume: SearchPlan };
 
 export interface RunPipelineDeps {
   repository: DataVeniaRepository;
@@ -135,11 +106,6 @@ export interface PipelineResultPayload {
 
 export type PipelineEvent =
   | { type: "start"; runId: string; traceId: string }
-  /**
-   * O pipeline parou no checkpoint humano e espera o plano aprovado. É terminal como `result` e
-   * `error`: o stream fecha depois dele, e a continuação vem em outra requisição.
-   */
-  | { type: "plan"; runId: string; traceId: string; proposal: SearchPlanProposal }
   | { type: "stage"; event: PipelineStageEvent }
   | { type: "progress"; steps: PipelineProgressStep[] }
   | { type: "result"; payload: PipelineResultPayload }
@@ -197,10 +163,7 @@ export async function* runPipeline(
 ): AsyncGenerator<PipelineEvent, void> {
   const { repository, llmProvider, jurisprudenceProvider: sourceProvider, signal } = deps;
   const crossFileLlmProvider = deps.crossFileLlmProvider ?? llmProvider;
-  const { runId, traceId } = input;
-  const resumePlan = "resume" in input ? input.resume : undefined;
-  const pauseAfterQueries = "pauseAfterQueries" in input ? input.pauseAfterQueries === true : false;
-  const file = "file" in input ? input.file : undefined;
+  const { runId, traceId, file } = input;
 
   const recorder = createStageRecorder();
   const startedAt = new Date().toISOString();
@@ -272,373 +235,253 @@ export async function* runPipeline(
 
   yield { type: "start", runId, traceId };
 
-  /**
-   * Primeira metade — ingestão e planejamento (nós 01 a 06).
-   *
-   * Só roda no envio. Na retomada ela é substituída por uma leitura do banco: parse,
-   * sanitização, análise de caso e geração de queries já rodaram, e refazê-las gastaria duas
-   * chamadas de modelo para chegar ao mesmo lugar — além de produzir um CaseAnalysis diferente
-   * do que o usuário viu quando aprovou os termos, que é pior do que caro.
-   */
-  // Vale para as duas metades: o cache de decisão bruta (§11.8) é a camada mais externa e não
-  // pode ser recriado por ramo, senão a retomada perderia o que a primeira fase já aqueceu.
+  const run = await repository.createRun({
+    runId,
+    traceId,
+    stage: INITIAL_STAGE,
+    status: "UPLOADED",
+    pipelineVersion: PIPELINE_VERSION,
+    startedAt,
+  });
+  if (run.isError) {
+    yield { type: "error", httpStatus: statusForError(run.error), error: run.error };
+    return;
+  }
+
+  yield progressEvent();
+
+  // ---------------------------------------------------------------- 01. Upload
+  const receivedAt = Date.now();
+  yield {
+    type: "stage",
+    event: recorder.record("RECEIVED", "Arquivo Recebido", "COMPLETED", receivedAt, {
+      id: NODE.received,
+      nodeName: "01. Upload de Documento",
+      input: { fileName: file.name, fileSize: file.size, mimeType: file.type },
+      output: { status: "RECEIVED", sizeBytes: file.size },
+      logs: [`[INFO] Arquivo ${file.name} carregado na API com sucesso.`],
+    }),
+  };
+
+  const buffer = file.bytes;
+
+  // ---------------------------------------------------------------- 02. Validação
+  const validatingDetail = {
+    id: NODE.validating,
+    nodeName: "02. Validação do Formato",
+    input: { fileName: file.name, bytes: buffer.length },
+  };
+  yield { type: "stage", event: recorder.start("VALIDATING", "Validação de Arquivo", validatingDetail) };
+  const tVal = Date.now();
+  const validation = await guardedExecution.run("validateFile", () => validateFile(buffer, file.name));
+  if (validation.isError) {
+    yield* failStage("VALIDATING", "Validação de Arquivo", tVal, validation.error, {
+      ...validatingDetail,
+      logs: [`[ERROR] Falha ao validar extensão ou formato: ${validation.error.description}`],
+    });
+    return;
+  }
+  yield {
+    type: "stage",
+    event: recorder.record("VALIDATING", "Validação de Arquivo", "COMPLETED", tVal, {
+      ...validatingDetail,
+      output: validation.data,
+      logs: [`[INFO] Extensão e MIME Type ${validation.data.mimeType} aprovados.`],
+    }),
+  };
+
+  // ---------------------------------------------------------------- 03. Parsing
+  const parsingDetail = {
+    id: NODE.parsing,
+    nodeName: "03. Parsing de PDF/DOCX",
+    input: { fileName: file.name, mimeType: validation.data.mimeType },
+  };
+  yield { type: "stage", event: recorder.start("PARSING", "Extração de Texto", parsingDetail) };
+  const tParse = Date.now();
+  const parsed = await guardedExecution.run("parseDocument", () =>
+    parseDocument(buffer, file.name, validation.data.mimeType),
+  );
+  if (parsed.isError) {
+    yield* failStage("PARSING", "Extração de Texto", tParse, parsed.error, {
+      ...parsingDetail,
+      logs: [`[ERROR] Falha na extração de texto: ${parsed.error.description}`],
+    });
+    return;
+  }
+  yield {
+    type: "stage",
+    event: recorder.record("PARSING", "Extração de Texto", "COMPLETED", tParse, {
+      ...parsingDetail,
+      output: {
+        documentId: parsed.data.documentId,
+        metadata: parsed.data.metadata,
+        charCount: parsed.data.text.length,
+      },
+      logs: [
+        `[INFO] Texto extraído (${parsed.data.text.length} caracteres, ${parsed.data.metadata.pageCount} páginas).`,
+      ],
+    }),
+  };
+
+  // ---------------------------------------------------------------- 04. Sanitização
+  const sanitizingDetail = {
+    id: NODE.sanitizing,
+    nodeName: "04. Sanitização LGPD/PII",
+    input: { documentId: parsed.data.documentId, rawLength: parsed.data.text.length },
+  };
+  yield { type: "stage", event: recorder.start("SANITIZING", "Sanitização PII (HU-05)", sanitizingDetail) };
+  const tSan = Date.now();
+  const sanitized = await guardedExecution.run("sanitizeDocument", async () =>
+    sanitizeDocument(parsed.data.documentId, parsed.data.text),
+  );
+  if (sanitized.isError) {
+    yield* failStage("SANITIZING", "Sanitização PII (HU-05)", tSan, sanitized.error, {
+      ...sanitizingDetail,
+      logs: [`[ERROR] Falha na sanitização PII: ${sanitized.error.description}`],
+    });
+    return;
+  }
+  yield {
+    type: "stage",
+    event: recorder.record("SANITIZING", "Sanitização PII (HU-05)", "COMPLETED", tSan, {
+      ...sanitizingDetail,
+      output: {
+        redactionsCount: sanitized.data.redactions.length,
+        sanitizedLength: sanitized.data.sanitizedText.length,
+      },
+      logs: [`[INFO] ${sanitized.data.redactions.length} dados pessoais mascarados/sanitizados.`],
+    }),
+  };
+
+  // Só o texto sanitizado é persistido (HU-05/HU-34): `parsed.data.text` (bruto) morre aqui, no
+  // escopo da requisição, e não existe coluna capaz de recebê-lo.
+  const document = await repository.saveDocument({
+    documentId: parsed.data.documentId,
+    runId,
+    fileName: parsed.data.fileName,
+    mimeType: parsed.data.mimeType,
+    contentHash: parsed.data.metadata.hash,
+    pageCount: parsed.data.metadata.pageCount,
+    sanitizedText: sanitized.data.sanitizedText,
+    redactions: sanitized.data.redactions,
+    createdAt: new Date().toISOString(),
+  });
+  if (document.isError) {
+    yield* failRun(document.error);
+    return;
+  }
+
+  const documentParsed = await repository.updateRun(runId, { status: "DOCUMENT_PARSED" });
+  if (documentParsed.isError) {
+    yield* failRun(documentParsed.error);
+    return;
+  }
+
+  progress.documentParsed = true;
+  yield progressEvent();
+
   const jurisprudenceProvider = createCachedJurisprudenceProvider(sourceProvider, repository);
 
-  let planning: PlanningArtifacts;
-
-  if (!resumePlan) {
-    if (!file) {
-      yield* failRun(
-        createAppError({
-          code: "MISSING_FILE",
-          category: "VALIDATION",
-          severity: "ERROR",
-          description: "runPipeline foi chamado sem arquivo e sem plano de retomada.",
-          userMessage: "Envie um arquivo para iniciar a análise.",
-          isRetryable: false,
-        }),
-      );
-      return;
-    }
-
-    const run = await repository.createRun({
-      runId,
-      traceId,
-      stage: INITIAL_STAGE,
-      status: "UPLOADED",
-      pipelineVersion: PIPELINE_VERSION,
-      startedAt,
-    });
-    if (run.isError) {
-      yield { type: "error", httpStatus: statusForError(run.error), error: run.error };
-      return;
-    }
-
-    yield progressEvent();
-
-    // ---------------------------------------------------------------- 01. Upload
-    const receivedAt = Date.now();
-    yield {
-      type: "stage",
-      event: recorder.record("RECEIVED", "Arquivo Recebido", "COMPLETED", receivedAt, {
-        id: NODE.received,
-        nodeName: "01. Upload de Documento",
-        input: { fileName: file.name, fileSize: file.size, mimeType: file.type },
-        output: { status: "RECEIVED", sizeBytes: file.size },
-        logs: [`[INFO] Arquivo ${file.name} carregado na API com sucesso.`],
-      }),
-    };
-
-    const buffer = file.bytes;
-
-    // ---------------------------------------------------------------- 02. Validação
-    const validatingDetail = {
-      id: NODE.validating,
-      nodeName: "02. Validação do Formato",
-      input: { fileName: file.name, bytes: buffer.length },
-    };
-    yield { type: "stage", event: recorder.start("VALIDATING", "Validação de Arquivo", validatingDetail) };
-    const tVal = Date.now();
-    const validation = await guardedExecution.run("validateFile", () => validateFile(buffer, file.name));
-    if (validation.isError) {
-      yield* failStage("VALIDATING", "Validação de Arquivo", tVal, validation.error, {
-        ...validatingDetail,
-        logs: [`[ERROR] Falha ao validar extensão ou formato: ${validation.error.description}`],
-      });
-      return;
-    }
-    yield {
-      type: "stage",
-      event: recorder.record("VALIDATING", "Validação de Arquivo", "COMPLETED", tVal, {
-        ...validatingDetail,
-        output: validation.data,
-        logs: [`[INFO] Extensão e MIME Type ${validation.data.mimeType} aprovados.`],
-      }),
-    };
-
-    // ---------------------------------------------------------------- 03. Parsing
-    const parsingDetail = {
-      id: NODE.parsing,
-      nodeName: "03. Parsing de PDF/DOCX",
-      input: { fileName: file.name, mimeType: validation.data.mimeType },
-    };
-    yield { type: "stage", event: recorder.start("PARSING", "Extração de Texto", parsingDetail) };
-    const tParse = Date.now();
-    const parsed = await guardedExecution.run("parseDocument", () =>
-      parseDocument(buffer, file.name, validation.data.mimeType),
-    );
-    if (parsed.isError) {
-      yield* failStage("PARSING", "Extração de Texto", tParse, parsed.error, {
-        ...parsingDetail,
-        logs: [`[ERROR] Falha na extração de texto: ${parsed.error.description}`],
-      });
-      return;
-    }
-    yield {
-      type: "stage",
-      event: recorder.record("PARSING", "Extração de Texto", "COMPLETED", tParse, {
-        ...parsingDetail,
-        output: {
-          documentId: parsed.data.documentId,
-          metadata: parsed.data.metadata,
-          charCount: parsed.data.text.length,
-        },
-        logs: [
-          `[INFO] Texto extraído (${parsed.data.text.length} caracteres, ${parsed.data.metadata.pageCount} páginas).`,
-        ],
-      }),
-    };
-
-    // ---------------------------------------------------------------- 04. Sanitização
-    const sanitizingDetail = {
-      id: NODE.sanitizing,
-      nodeName: "04. Sanitização LGPD/PII",
-      input: { documentId: parsed.data.documentId, rawLength: parsed.data.text.length },
-    };
-    yield { type: "stage", event: recorder.start("SANITIZING", "Sanitização PII (HU-05)", sanitizingDetail) };
-    const tSan = Date.now();
-    const sanitized = await guardedExecution.run("sanitizeDocument", async () =>
-      sanitizeDocument(parsed.data.documentId, parsed.data.text),
-    );
-    if (sanitized.isError) {
-      yield* failStage("SANITIZING", "Sanitização PII (HU-05)", tSan, sanitized.error, {
-        ...sanitizingDetail,
-        logs: [`[ERROR] Falha na sanitização PII: ${sanitized.error.description}`],
-      });
-      return;
-    }
-    yield {
-      type: "stage",
-      event: recorder.record("SANITIZING", "Sanitização PII (HU-05)", "COMPLETED", tSan, {
-        ...sanitizingDetail,
-        output: {
-          redactionsCount: sanitized.data.redactions.length,
-          sanitizedLength: sanitized.data.sanitizedText.length,
-        },
-        logs: [`[INFO] ${sanitized.data.redactions.length} dados pessoais mascarados/sanitizados.`],
-      }),
-    };
-
-    // Só o texto sanitizado é persistido (HU-05/HU-34): `parsed.data.text` (bruto) morre aqui, no
-    // escopo da requisição, e não existe coluna capaz de recebê-lo.
-    const document = await repository.saveDocument({
-      documentId: parsed.data.documentId,
-      runId,
-      fileName: parsed.data.fileName,
-      mimeType: parsed.data.mimeType,
-      contentHash: parsed.data.metadata.hash,
-      pageCount: parsed.data.metadata.pageCount,
-      sanitizedText: sanitized.data.sanitizedText,
-      redactions: sanitized.data.redactions,
-      createdAt: new Date().toISOString(),
-    });
-    if (document.isError) {
-      yield* failRun(document.error);
-      return;
-    }
-
-    const documentParsed = await repository.updateRun(runId, { status: "DOCUMENT_PARSED" });
-    if (documentParsed.isError) {
-      yield* failRun(documentParsed.error);
-      return;
-    }
-
-    progress.documentParsed = true;
-    yield progressEvent();
-
-    // ---------------------------------------------------------------- 05. Case Understanding
-    const caseDetail = {
-      id: NODE.documentAnalysis,
-      nodeName: "05. Case Understanding (Fatos/Teses)",
-      input: { sanitizedLength: sanitized.data.sanitizedText.length },
-    };
-    yield { type: "stage", event: recorder.start("DOCUMENT_ANALYSIS", "Análise de Caso (LLM)", caseDetail) };
-    const tCase = Date.now();
-    const caseAnalysis = await guardedExecution.run("analyzeCase", () =>
-      analyzeCase(sanitized.data, llmProvider, signal),
-    );
-    if (caseAnalysis.isError) {
-      yield* failStage("DOCUMENT_ANALYSIS", "Análise de Caso (LLM)", tCase, caseAnalysis.error, caseDetail);
-      return;
-    }
-    yield {
-      type: "stage",
-      event: recorder.record("DOCUMENT_ANALYSIS", "Análise de Caso (LLM)", "COMPLETED", tCase, {
-        ...caseDetail,
-        output: {
-          legalIssuesCount: caseAnalysis.data.legalIssues.length,
-          factsCount: caseAnalysis.data.facts.length,
-        },
-        logs: [
-          `[INFO] Análise do caso concluída com ${caseAnalysis.data.legalIssues.length} teses jurídicas mapeadas.`,
-        ],
-      }),
-    };
-
-    const savedCaseAnalysis = await repository.saveCaseAnalysis({
-      runId,
-      documentId: parsed.data.documentId,
-      content: caseAnalysis.data,
-      createdAt: new Date().toISOString(),
-    });
-    if (savedCaseAnalysis.isError) {
-      yield* failRun(savedCaseAnalysis.error);
-      return;
-    }
-
-    const caseAnalyzed = await repository.updateRun(runId, {
-      stage: "QUERY_GENERATION",
-      status: "CASE_ANALYZED",
-    });
-    if (caseAnalyzed.isError) {
-      yield* failRun(caseAnalyzed.error);
-      return;
-    }
-    currentStage = "QUERY_GENERATION";
-
-    // ---------------------------------------------------------------- 06. Query Builder
-    const queryDetail = {
-      id: NODE.queryGeneration,
-      nodeName: "06. Query Builder (LLM)",
-      input: { legalIssuesCount: caseAnalysis.data.legalIssues.length },
-    };
-    yield { type: "stage", event: recorder.start("QUERY_GENERATION", "Geração de Queries", queryDetail) };
-    const tQueries = Date.now();
-    const queryPlan = await guardedExecution.run("generateSearchQueries", () =>
-      generateSearchQueries(caseAnalysis.data, llmProvider, signal),
-    );
-    if (queryPlan.isError) {
-      yield* failStage("QUERY_GENERATION", "Geração de Queries", tQueries, queryPlan.error, queryDetail);
-      return;
-    }
-    yield {
-      type: "stage",
-      event: recorder.record("QUERY_GENERATION", "Geração de Queries", "COMPLETED", tQueries, {
-        ...queryDetail,
-        output: { totalQueries: queryPlan.data.queries.length, queries: queryPlan.data.queries },
-        logs: [`[INFO] ${queryPlan.data.queries.length} pesquisas jurídicas personalizadas foram criadas.`],
-      }),
-    };
-
-    const queriesGenerated = await repository.updateRun(runId, {
-      stage: "SEARCH",
-      status: "QUERIES_GENERATED",
-    });
-    if (queriesGenerated.isError) {
-      yield* failRun(queriesGenerated.error);
-      return;
-    }
-    currentStage = "SEARCH";
-
-    progress.queriesGenerated = queryPlan.data.queries.length;
-    yield progressEvent();
-
-    planning = {
-      documentId: parsed.data.documentId,
-      fileName: parsed.data.fileName,
-      mimeType: parsed.data.mimeType,
-      metadata: parsed.data.metadata,
-      sanitizedText: sanitized.data.sanitizedText,
-      redactions: sanitized.data.redactions,
-      caseAnalysis: caseAnalysis.data,
-      queries: queryPlan.data.queries,
-    };
-
-    // Checkpoint humano: entrega a proposta e encerra o stream. A busca só roda na requisição
-    // seguinte, com o que o usuário aprovou — é o ponto do fluxo em que ele ainda consegue
-    // corrigir um termo errado antes de gastar o funil de busca e uma chamada por decisão.
-    if (pauseAfterQueries) {
-      yield {
-        type: "plan",
-        runId,
-        traceId,
-        proposal: {
-          queries: planning.queries,
-          legalIssues: planning.caseAnalysis.legalIssues.map((issue) => ({
-            id: issue.id,
-            topic: issue.topic,
-            question: issue.question,
-          })),
-        },
-      };
-      return;
-    }
-  } else {
-    // Retomada: o estado vem de `loadRun`, e as queries vêm do usuário, não do modelo.
-    const snapshot = await repository.loadRun(runId);
-    if (snapshot.isError) {
-      yield* failRun(snapshot.error);
-      return;
-    }
-
-    const anterior = snapshot.data;
-    if (!anterior?.document || !anterior.caseAnalysis) {
-      yield* failRun(
-        createAppError({
-          code: "RUN_NOT_RESUMABLE",
-          category: "BUSINESS_RULE",
-          severity: "ERROR",
-          description:
-            "A execução não tem documento e análise de caso persistidos — não há de onde retomar a busca.",
-          userMessage:
-            "Esta análise não está mais disponível para continuar. Envie o documento novamente.",
-          isRetryable: false,
-          metadata: { runId },
-        }),
-      );
-      return;
-    }
-
-    planning = {
-      documentId: anterior.document.documentId,
-      fileName: anterior.document.fileName,
-      mimeType: anterior.document.mimeType,
-      metadata: {
-        pageCount: anterior.document.pageCount,
-        hash: anterior.document.contentHash,
-      },
-      sanitizedText: anterior.document.sanitizedText,
-      // O registro guarda `type` como string livre; o domínio exige o enum. Revalidar aqui é a
-      // mesma regra de §11.7 aplicada ao storage — dado que entrou por outro caminho não é
-      // confiável só por estar no banco. Redação irreconhecível é descartada da exibição, nunca
-      // promovida a tipo válido no grito.
-      redactions: RedactionSummarySchema.array().catch([]).parse(anterior.document.redactions),
-      caseAnalysis: anterior.caseAnalysis.content,
-      queries: resumePlan.queries,
-      filters: resumePlan.filters,
-    };
-
-    const retomada = await repository.updateRun(runId, {
-      stage: "SEARCH",
-      status: "QUERIES_GENERATED",
-    });
-    if (retomada.isError) {
-      yield* failRun(retomada.error);
-      return;
-    }
-
-    currentStage = "SEARCH";
-    progress.documentParsed = true;
-    progress.queriesGenerated = planning.queries.length;
-    yield progressEvent();
+  // ---------------------------------------------------------------- 05. Case Understanding
+  const caseDetail = {
+    id: NODE.documentAnalysis,
+    nodeName: "05. Case Understanding (Fatos/Teses)",
+    input: { sanitizedLength: sanitized.data.sanitizedText.length },
+  };
+  yield { type: "stage", event: recorder.start("DOCUMENT_ANALYSIS", "Análise de Caso (LLM)", caseDetail) };
+  const tCase = Date.now();
+  const caseAnalysis = await guardedExecution.run("analyzeCase", () =>
+    analyzeCase(sanitized.data, llmProvider, signal),
+  );
+  if (caseAnalysis.isError) {
+    yield* failStage("DOCUMENT_ANALYSIS", "Análise de Caso (LLM)", tCase, caseAnalysis.error, caseDetail);
+    return;
   }
+  yield {
+    type: "stage",
+    event: recorder.record("DOCUMENT_ANALYSIS", "Análise de Caso (LLM)", "COMPLETED", tCase, {
+      ...caseDetail,
+      output: {
+        legalIssuesCount: caseAnalysis.data.legalIssues.length,
+        factsCount: caseAnalysis.data.facts.length,
+      },
+      logs: [
+        `[INFO] Análise do caso concluída com ${caseAnalysis.data.legalIssues.length} teses jurídicas mapeadas.`,
+      ],
+    }),
+  };
+
+  const savedCaseAnalysis = await repository.saveCaseAnalysis({
+    runId,
+    documentId: parsed.data.documentId,
+    content: caseAnalysis.data,
+    createdAt: new Date().toISOString(),
+  });
+  if (savedCaseAnalysis.isError) {
+    yield* failRun(savedCaseAnalysis.error);
+    return;
+  }
+
+  const caseAnalyzed = await repository.updateRun(runId, {
+    stage: "QUERY_GENERATION",
+    status: "CASE_ANALYZED",
+  });
+  if (caseAnalyzed.isError) {
+    yield* failRun(caseAnalyzed.error);
+    return;
+  }
+  currentStage = "QUERY_GENERATION";
+
+  // ---------------------------------------------------------------- 06. Query Builder
+  const queryDetail = {
+    id: NODE.queryGeneration,
+    nodeName: "06. Query Builder (LLM)",
+    input: { legalIssuesCount: caseAnalysis.data.legalIssues.length },
+  };
+  yield { type: "stage", event: recorder.start("QUERY_GENERATION", "Geração de Queries", queryDetail) };
+  const tQueries = Date.now();
+  const queryPlan = await guardedExecution.run("generateSearchQueries", () =>
+    generateSearchQueries(caseAnalysis.data, llmProvider, signal),
+  );
+  if (queryPlan.isError) {
+    yield* failStage("QUERY_GENERATION", "Geração de Queries", tQueries, queryPlan.error, queryDetail);
+    return;
+  }
+  yield {
+    type: "stage",
+    event: recorder.record("QUERY_GENERATION", "Geração de Queries", "COMPLETED", tQueries, {
+      ...queryDetail,
+      output: { totalQueries: queryPlan.data.queries.length, queries: queryPlan.data.queries },
+      logs: [`[INFO] ${queryPlan.data.queries.length} pesquisas jurídicas personalizadas foram criadas.`],
+    }),
+  };
+
+  const queriesGenerated = await repository.updateRun(runId, {
+    stage: "SEARCH",
+    status: "QUERIES_GENERATED",
+  });
+  if (queriesGenerated.isError) {
+    yield* failRun(queriesGenerated.error);
+    return;
+  }
+  currentStage = "SEARCH";
+
+  progress.queriesGenerated = queryPlan.data.queries.length;
+  yield progressEvent();
 
   // ---------------------------------------------------------------- 07. Busca e pré-ranking
   const searchDetail = {
     id: NODE.search,
     nodeName: "07. Busca & Pre-Ranking (TJPR)",
-    input: { totalQueries: planning.queries.length },
+    input: { totalQueries: queryPlan.data.queries.length },
   };
   yield { type: "stage", event: recorder.start("SEARCH", "Busca Jurisprudencial", searchDetail) };
   const tSearch = Date.now();
   const foundItems: JurisprudenceSearchItem[] = [];
   const jurisprudenceSources = new Set<string>();
-  for (const searchQuery of planning.queries) {
+  for (const searchQuery of queryPlan.data.queries) {
     if (signal?.aborted) break;
-    // Os filtros aprovados pelo usuário entram em TODA query do plano: o funil de HU-13 conta
-    // o total por busca, e aplicar o recorte em só algumas daria um total que não corresponde a
-    // recorte nenhum.
-    const query = { query: searchQuery.query, filters: planning.filters };
+    const query = { query: searchQuery.query };
     const searchResult = await guardedExecution.run("searchJurisprudence", () =>
       jurisprudenceProvider.search(query),
     );
@@ -675,7 +518,7 @@ export async function* runPipeline(
   }
 
   const uniqueItems = dedupeSearchItems(foundItems);
-  const ranked = rankCandidates(uniqueItems, buildPreRankingContext(planning.caseAnalysis));
+  const ranked = rankCandidates(uniqueItems, buildPreRankingContext(caseAnalysis.data));
   const selected = selectForScratchpad(ranked);
   if (selected.isError) {
     yield* failStage("SEARCH", "Seleção de Julgados", tSearch, selected.error, {
@@ -778,7 +621,7 @@ export async function* runPipeline(
   yield { type: "stage", event: recorder.start("CROSS_FILE_ANALYSIS", "Análise Cruzada", crossFileDetail) };
   const tCross = Date.now();
   const crossFile = await guardedExecution.run("analyzeCrossFile", () =>
-    analyzeCrossFile(planning.caseAnalysis, scratchpadBatch.data.scratchpads, crossFileLlmProvider, signal),
+    analyzeCrossFile(caseAnalysis.data, scratchpadBatch.data.scratchpads, crossFileLlmProvider, signal),
   );
   if (crossFile.isError) {
     yield* failStage("CROSS_FILE_ANALYSIS", "Análise Cruzada", tCross, crossFile.error, crossFileDetail);
@@ -877,7 +720,7 @@ export async function* runPipeline(
   const evidencePolicy = enforceEvidencePolicy(crossFile.data.analyses, evidence.data.evidences);
   const report = await guardedExecution.run("buildReport", async () =>
     buildReport({
-      caseAnalysis: planning.caseAnalysis,
+      caseAnalysis: caseAnalysis.data,
       analyses: evidencePolicy.analyses,
       evidences: evidence.data.evidences,
       scratchpads: scratchpadBatch.data.scratchpads,
@@ -926,12 +769,12 @@ export async function* runPipeline(
     payload: {
       runId,
       traceId,
-      documentId: planning.documentId,
-      fileName: planning.fileName,
-      mimeType: planning.mimeType,
-      metadata: planning.metadata,
-      sanitizedTextPreview: planning.sanitizedText.slice(0, 2000),
-      redactions: planning.redactions,
+      documentId: parsed.data.documentId,
+      fileName: parsed.data.fileName,
+      mimeType: parsed.data.mimeType,
+      metadata: parsed.data.metadata,
+      sanitizedTextPreview: sanitized.data.sanitizedText.slice(0, 2000),
+      redactions: sanitized.data.redactions,
       stages: recorder.events,
       progress: buildPipelineProgress(progress),
       provider: {

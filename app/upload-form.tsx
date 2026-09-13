@@ -18,8 +18,7 @@ import { Botao } from "@/components/ui/botao";
 import { Rotulo } from "@/components/ui/rotulo";
 import { Marcador } from "@/components/ui/marcador";
 import { Dropzone } from "@/components/ui/dropzone";
-import { PlanoDeBusca } from "@/components/envio/plano-de-busca";
-import type { SearchPlan, SearchPlanProposal } from "@/lib/schemas/search-plan.schema";
+import { EscopoDaBusca } from "@/components/envio/escopo-da-busca";
 
 type UploadSuccess = PipelineResultPayload;
 
@@ -49,8 +48,6 @@ export function UploadForm() {
   const [liveStages, setLiveStages] = useState<PipelineStageEvent[]>([]);
   const [liveProgress, setLiveProgress] = useState<PipelineProgressStep[] | null>(null);
   const [liveRun, setLiveRun] = useState<{ runId: string; traceId: string } | null>(null);
-  /** Proposta de termos devolvida pela Fase A; enquanto existir, a busca ainda não rodou. */
-  const [proposal, setProposal] = useState<SearchPlanProposal | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   function handleCancel() {
@@ -62,26 +59,32 @@ export function UploadForm() {
     setErrorMessage("Processamento cancelado pelo usuário.");
   }
 
-  /**
-   * As duas fases falam o mesmo protocolo NDJSON e terminam do mesmo jeito, então o consumo é um
-   * só. A única diferença está em qual evento encerra: a Fase A termina em `plan` (os termos para
-   * revisar), a Fase B em `result`.
-   */
-  async function enviar(formData: FormData) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!file) return;
+
     const controller = new AbortController();
     abortControllerRef.current = controller;
+
     setIsSubmitting(true);
+    setResult(null);
     setErrorMessage(null);
+    setLiveStages([]);
+    setLiveProgress(null);
+    setLiveRun(null);
 
     try {
+      const formData = new FormData();
+      formData.append("file", file);
+
       const response = await fetch("/api/documents", {
         method: "POST",
         body: formData,
         signal: controller.signal,
       });
 
-      // Falhas anteriores à abertura do stream (arquivo ausente, plano inválido, credencial
-      // faltando) continuam chegando como JSON único com status HTTP real.
+      // Falhas anteriores à abertura do stream (arquivo ausente, credencial faltando) continuam
+      // chegando como JSON único com status HTTP real.
       const contentType = response.headers.get("content-type") ?? "";
       if (!contentType.includes("ndjson") || !response.body) {
         const body = (await response.json()) as UploadErrorBody;
@@ -102,11 +105,6 @@ export function UploadForm() {
             break;
           case "progress":
             setLiveProgress(event.steps);
-            break;
-          case "plan":
-            sawTerminalEvent = true;
-            setLiveRun({ runId: event.runId, traceId: event.traceId });
-            setProposal(event.proposal);
             break;
           case "result":
             sawTerminalEvent = true;
@@ -134,41 +132,6 @@ export function UploadForm() {
       setIsSubmitting(false);
       abortControllerRef.current = null;
     }
-  }
-
-  /** Fase A — lê a peça e para no checkpoint humano, sem tocar na busca. */
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!file) return;
-
-    setResult(null);
-    setProposal(null);
-    setLiveStages([]);
-    setLiveProgress(null);
-    setLiveRun(null);
-
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("mode", "plan");
-    await enviar(formData);
-  }
-
-  /** Fase B — retoma da busca com o plano aprovado. */
-  async function confirmarPlano(plan: SearchPlan) {
-    if (!liveRun) return;
-    const formData = new FormData();
-    formData.append("runId", liveRun.runId);
-    formData.append("traceId", liveRun.traceId);
-    formData.append("plan", JSON.stringify(plan));
-    await enviar(formData);
-  }
-
-  function descartarPlano() {
-    setProposal(null);
-    setLiveStages([]);
-    setLiveProgress(null);
-    setLiveRun(null);
-    setFile(null);
   }
 
   const [isN8nModalOpen, setIsN8nModalOpen] = useState(false);
@@ -202,7 +165,7 @@ export function UploadForm() {
                 </>
               ) : (
                 <Botao type="submit" variante="primaria" disabled={!file} className="flex-1">
-                  Ler a peça e sugerir termos
+                  Enviar documento
                 </Botao>
               )}
 
@@ -213,15 +176,6 @@ export function UploadForm() {
               ) : null}
             </div>
           </form>
-
-          {proposal && !result && (
-            <PlanoDeBusca
-              proposal={proposal}
-              onConfirmar={confirmarPlano}
-              onCancelar={descartarPlano}
-              ocupado={isSubmitting}
-            />
-          )}
 
           {displayProgress && (
             // sem `overflow-hidden`: o painel do HelpHint e absolute e estoura o card de
@@ -287,6 +241,8 @@ export function UploadForm() {
 
         {/* coluna lateral — escopo e privacidade */}
         <div className="flex flex-col gap-5">
+          <EscopoDaBusca />
+
           {/* uso funcional da cor de informação: é contexto, não alerta */}
           <Cartao className="border-l-[3px] border-l-vn-info p-6">
             <h3 className="mb-2 text-apoio font-bold">O que sai do seu documento</h3>

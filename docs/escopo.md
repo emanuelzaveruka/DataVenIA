@@ -49,8 +49,8 @@ tornar rastreável — §10 exige decisão explícita, nunca por omissão).
   a tela "Acesso" do protótipo — a tela de login NÃO entra, cadastro segue fora do escopo acima);
   (b) **dashboard tabular de relatório** (`/relatorio`, com KPIs, distribuição, abas e filtros —
   `/relatorio-demo` continua sendo a tela que confere HU-26/27/28 sobre a fixture); (c) **exportação
-  DOCX/XLSX**, visível e desabilitada; (d) **filtros de escopo de busca** no envio (Câmara, Período) — **implementado
-  em 13/09/2026, ver entrada abaixo**. Nada disso altera o pipeline Map→Reduce→Verify nem o que vai
+  DOCX/XLSX**, visível e desabilitada; (d) **filtros de escopo de busca** no envio (Câmara, Período),
+  interativos mas não aplicados à busca. Nada disso altera o pipeline Map→Reduce→Verify nem o que vai
   ao relatório.
 
   Ligar qualquer um deles de verdade **exige decisão explícita** e muda contrato: (a) e (b) dependem
@@ -63,26 +63,6 @@ tornar rastreável — §10 exige decisão explícita, nunca por omissão).
   Favorável" por relator). §3.10/HU-29 proíbem expor score interno como probabilidade de êxito. Foram
   implementados como contagem absoluta com denominador visível e rótulo qualitativo, mantendo o
   layout. Reverter para percentual exigiria mudar a HU, não o CSS.
-
-- **2026-09-13 — checkpoint humano antes da busca (implementado).** O pipeline passa a poder parar
-  entre `QUERY_GENERATION` e `SEARCH` (`pauseAfterQueries`), devolver os termos que extraiu da peça e
-  só buscar depois que o usuário aprovar o plano — removendo termo, acrescentando o seu, e definindo
-  Câmara e período, que agora chegam de verdade ao provider como `JurisprudenceQueryFilters`.
-
-  **Por que é aceitável dentro do escopo**: não acrescenta fonte, tribunal ou etapa ao
-  Map→Reduce→Verify; move para antes da busca uma decisão que HU-13 já exigia do usuário depois
-  (`SEARCH_RESULTS_EXCEED_CAP` manda "refine com período, órgão julgador ou relator" — até aqui, numa
-  tela sem como fazê-lo). O relatório continua saindo do mesmo pipeline, com as mesmas garantias.
-
-  **Limite que NÃO é negociável na UI**: o plano aprovado precisa manter ao menos uma pesquisa
-  `CONTRARY` (HU-11). A regra vive em `SearchPlanSchema` (`lib/schemas/search-plan.schema.ts`), não
-  num aviso de tela: sem ela a busca sairia de um lado só e o relatório ainda afirmaria "nenhum
-  precedente contrário identificado na amostra" (HU-22) — que passaria a ser verdade sobre a busca,
-  não sobre o acervo. O front explica; o schema garante.
-
-  **Limitação conhecida**: a retomada lê o estado por `loadRun`, então as duas requisições precisam
-  cair no mesmo processo. Com o repositório em memória (padrão) isso vale em dev e em instância
-  única, não em serverless com várias instâncias — ali depende do Supabase provisionado.
 
 Ver também HU-38 (plano de validação da fonte TJPR) para os limites do que pode ser feito com o
 portal público antes de qualquer decisão de integração real.
