@@ -3,7 +3,14 @@ import type { CrossFileAnalysis } from "../../../schemas/cross-file.schema";
 import type { VerifiedEvidence } from "../../../schemas/evidence.schema";
 import type { DecisionScratchpad } from "../../../schemas/scratchpad.schema";
 
-export const OFFICIAL_URL = "https://portal.tjpr.jus.br/jurisprudencia/publico/#/decisao/fixture-001";
+/**
+ * URL canônica de decisão, no formato que o portal responde com HTTP 200 (verificado em
+ * 2026-09-13): `/jurisprudencia/j/{id}/{classe}/{assunto}-{numeroProcesso}`. O valor anterior
+ * apontava para `/jurisprudencia/publico/#/decisao/fixture-001`, que é 404 — e como a allowlist só
+ * checava host e esquema, o teste passava exibindo um link quebrado.
+ */
+export const OFFICIAL_URL =
+  "https://portal.tjpr.jus.br/jurisprudencia/j/4100000032734133/D%C3%BAvida/exame%20de%20compet%C3%AAncia-0018288-78.2024.8.16.0019";
 
 export function caseAnalysis(overrides: Partial<CaseAnalysis> = {}): CaseAnalysis {
   return {

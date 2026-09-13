@@ -1,8 +1,20 @@
-import type { ToolResult } from "../errors/tool-result";
+import { toolFailure, type ToolResult } from "../errors/tool-result";
+import type { AppError } from "../errors/app-error";
 import type { WorkflowStage } from "../workflow/state-machine";
 import type { ExecutionRecorder } from "../observability/execution-recorder";
 
-export interface PostToolUseContext {
+/**
+ * Segunda camada de validação de §11.2, na forma mais estreita que resolve o problema: recebe o
+ * payload já validado pelo serviço e devolve **um erro ou nada**.
+ *
+ * Não recebe o `ToolResult` inteiro nem pode devolver outro payload de propósito. Um validator
+ * capaz de reescrever a saída seria um ponto de mutação novo entre duas etapas — exatamente o que
+ * o pipeline determinístico existe para não ter. Ele reprova ou deixa passar; corrigir dado é
+ * responsabilidade de quem o produziu.
+ */
+export type ToolResultValidator<T> = (data: T) => AppError | undefined;
+
+export interface PostToolUseContext<T> {
   stage: WorkflowStage;
   toolName: string;
   /**
@@ -13,14 +25,19 @@ export interface PostToolUseContext {
   recorder?: ExecutionRecorder;
   /** Início da chamada, quando o chamador já mediu — evita cronometrar duas vezes a mesma tool. */
   startedAtMs?: number;
-  /** Validator pós-execução para verificar integridade do payload antes do orquestrador avançar. */
-  validator?: <T>(result: ToolResult<T>) => ToolResult<T>;
+  /** Checagem de contrato entre etapas, aplicada só ao resultado de sucesso. */
+  validator?: ToolResultValidator<T>;
 }
 
 /**
- * Segunda camada de validação (§11.2): registra telemetria e devolve o `ToolResult` processado. A
- * validação estrutural (Zod) do payload de sucesso é responsabilidade de cada serviço, podendo
- * ser reforçada pelo `validator` de pós-análise.
+ * Segunda camada de validação (§11.2): aplica o validator, registra telemetria e devolve o
+ * `ToolResult` processado. A validação estrutural (Zod) do payload é responsabilidade de cada
+ * serviço; o `validator` cobre o que nenhum serviço sozinho enxerga — o contrato entre a etapa que
+ * produziu o payload e a que vai consumi-lo.
+ *
+ * A ordem importa: o log de §11.9 sai **depois** da validação, com o veredito final. Registrar o
+ * sucesso do serviço e só então reprovar o payload deixaria `tool_executions` afirmando que uma
+ * etapa deu certo enquanto o pipeline parava por causa dela.
  *
  * Desde a Fase 8 o hook cumpre de fato o "registra telemetria" de HU-31: com um recorder, cada
  * chamada vira uma linha de `tool_executions` (HU-35) em vez de uma linha de console que ninguém
@@ -29,9 +46,14 @@ export interface PostToolUseContext {
  */
 export function postToolUse<T>(
   result: ToolResult<T>,
-  context: PostToolUseContext,
+  context: PostToolUseContext<T>,
 ): ToolResult<T> {
-  const finalResult = context.validator ? context.validator(result) : result;
+  let finalResult = result;
+
+  if (!result.isError && context.validator) {
+    const violation = context.validator(result.data);
+    if (violation) finalResult = toolFailure(violation);
+  }
 
   if (context.recorder) {
     void context.recorder.recordCall(

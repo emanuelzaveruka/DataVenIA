@@ -61,7 +61,9 @@ jurisprudência roda em modo fixture.
   degradação silenciosa. `provider.model` (obrigatório desde a Fase 8) mantém a chave de
   idempotência de HU-33 separada por modelo.
 - **Fase 4 — Busca, ranking, seleção** ✅ concluída. HU-13 (`lib/services/jurisprudence/search-funnel.ts` —
-  bloqueia e pede filtros quando `totalCount > rawSearchResultsCap`), HU-15
+  **desde 2026-09-13** o teto vale sobre o que a busca *coleta* (`SEARCH_COLLECTED_ITEMS_CAP` = 60,
+  3 páginas de 20), e não sobre `totalCount`: busca ampla vira aviso de refinamento, não mais falha
+  fatal da execução — decisão registrada em `docs/escopo.md`), HU-15
   (`lib/services/jurisprudence/pre-rank.ts` — score ponderado por critério com peso redistribuído
   proporcionalmente quando um critério não é computável, já que `JurisprudenceSearchItem` [§3.4] não
   carrega classe/assunto), HU-16 (`lib/services/jurisprudence/select-candidates.ts` — seleção
