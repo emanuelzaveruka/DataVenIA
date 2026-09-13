@@ -181,13 +181,17 @@ Nada aqui foi executado — provisionar é decisão de quem opera as contas.
 1. Importar o repositório na Vercel (Next.js é detectado automaticamente; não há configuração
    especial de build).
 2. Configurar as variáveis de ambiente do projeto: ao menos uma chave de LLM (`OPENAI_API_KEY`,
-   `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY` — duas delas ligam o fallback entre modelos), e
+   `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY` — duas delas ligam o fallback entre modelos),
+   **`JURISPRUDENCE_PROVIDER=tjpr`** (sem ela, a busca roda sobre a fixture fictícia de 9 decisões
+   — ver [Jurisprudência: fixture ou TJPR](#jurisprudência-fixture-ou-tjpr) — fácil de esquecer
+   justamente porque o deploy sobe normalmente e sem erro nenhum sem essa variável), e
    `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` se for usar Postgres. Todas como variáveis de
    servidor — nenhuma com prefixo `NEXT_PUBLIC_`.
 3. Aplicar a migration no banco de produção **antes** do primeiro deploy que use persistência.
 
-Sem as variáveis do Supabase o deploy sobe e funciona em memória + fixture, o que é suficiente
-para demonstração.
+Sem `JURISPRUDENCE_PROVIDER`/as variáveis do Supabase o deploy sobe e funciona em memória +
+fixture, o que é suficiente para demonstração — mas não é jurisprudência real, então confira essa
+variável especificamente se o objetivo do deploy é pesquisar no TJPR de verdade.
 
 ## Estrutura
 
