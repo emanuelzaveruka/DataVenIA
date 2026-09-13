@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useRef, type FormEvent } from "react";
 import type { PipelineStageEvent } from "../lib/workflow/pipeline-stage-event";
 import type { PipelineEvent, PipelineResultPayload } from "../lib/workflow/run-pipeline";
@@ -20,6 +21,7 @@ import { Marcador } from "@/components/ui/marcador";
 import { Dropzone } from "@/components/ui/dropzone";
 import { EscopoDaBusca, inicioDoPeriodo } from "@/components/envio/escopo-da-busca";
 import { CabecalhoImpressao } from "@/components/relatorio/cabecalho-impressao";
+import { guardarRelatorio } from "@/components/relatorio/ultimo-relatorio";
 
 type UploadSuccess = PipelineResultPayload;
 
@@ -120,6 +122,14 @@ export function UploadForm() {
           case "result":
             sawTerminalEvent = true;
             setResult(event.payload);
+            // O painel de /relatorio lê daqui. Guardar no momento em que o resultado chega evita
+            // depender de o usuário continuar nesta tela — e morre com a aba, como HU-06 exige.
+            guardarRelatorio({
+              report: event.payload.report,
+              fileName: event.payload.fileName,
+              runId: event.payload.runId,
+              geradoEm: event.payload.report.generatedAt,
+            });
             break;
           case "error":
             sawTerminalEvent = true;
@@ -327,6 +337,12 @@ export function UploadForm() {
                 <Botao type="button" variante="primaria" onClick={exportarPdf}>
                   Exportar PDF
                 </Botao>
+                <Link
+                  href="/relatorio"
+                  className="inline-flex items-center rounded-controle border border-vn-navy-800 px-5 py-2.5 text-apoio font-semibold text-vn-navy-800 transition-colors ease-vn hover:bg-vn-navy-100"
+                >
+                  Ver painel de números →
+                </Link>
                 <Botao type="button" variante="texto" onClick={() => setIsN8nModalOpen(true)}>
                   Visualizar orquestração
                 </Botao>
