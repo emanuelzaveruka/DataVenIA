@@ -9,7 +9,9 @@ import {
   runPipeline,
   pipelineUnexpectedError,
   type PipelineEvent,
+  type RunPipelineInput,
 } from "../../../lib/workflow/run-pipeline";
+import { SearchPlanSchema } from "../../../lib/schemas/search-plan.schema";
 
 export const runtime = "nodejs";
 
@@ -49,16 +51,91 @@ export async function POST(request: Request) {
   const jurisprudenceProvider = getJurisprudenceProvider();
 
   const formData = await request.formData();
-  const file = formData.get("file");
+  const planoBruto = formData.get("plan");
 
-  if (!(file instanceof File)) {
-    return NextResponse.json(
-      { error: { code: "MISSING_FILE", userMessage: "Envie um arquivo no campo \"file\"." } },
-      { status: 400 },
-    );
+  /**
+   * Duas entradas na mesma rota, decididas pela presença de `plan`:
+   *
+   * - **envio** (`file`, com `mode=plan` para parar no checkpoint humano);
+   * - **retomada** (`runId` + `plan`), que continua da busca com os termos que o usuário aprovou.
+   *
+   * O `plan` chega pela rede e é validado como qualquer entrada externa: `SearchPlanSchema` garante
+   * a regra de HU-11 que a UI apenas explica — sem ao menos uma pesquisa CONTRARY, a busca sairia
+   * de um lado só e o relatório ainda diria "nenhum precedente contrário na amostra", que passaria
+   * a ser mentira sobre a busca em vez de fato sobre o acervo.
+   */
+  let pipelineInput: RunPipelineInput;
+
+  if (typeof planoBruto === "string") {
+    const runId = formData.get("runId");
+    if (typeof runId !== "string" || runId.length === 0) {
+      return NextResponse.json(
+        {
+          error: {
+            code: "MISSING_RUN_ID",
+            userMessage: "Para continuar uma análise é preciso informar qual execução retomar.",
+          },
+        },
+        { status: 400 },
+      );
+    }
+
+    let json: unknown;
+    try {
+      json = JSON.parse(planoBruto);
+    } catch {
+      return NextResponse.json(
+        {
+          error: {
+            code: "INVALID_SEARCH_PLAN",
+            userMessage: "O plano de busca enviado não pôde ser lido.",
+          },
+        },
+        { status: 400 },
+      );
+    }
+
+    const plano = SearchPlanSchema.safeParse(json);
+    if (!plano.success) {
+      return NextResponse.json(
+        {
+          error: {
+            code: "INVALID_SEARCH_PLAN",
+            userMessage:
+              plano.error.issues[0]?.message ?? "O plano de busca enviado não é válido.",
+            description: plano.error.issues.map((issue) => issue.message).join(" "),
+          },
+        },
+        { status: 422 },
+      );
+    }
+
+    // O traceId da fase anterior volta pelo formulário para que as duas metades fiquem na mesma
+    // linha do tempo auditável (HU-34/HU-35); sem ele, a retomada apareceria como execução órfã.
+    const traceId = formData.get("traceId");
+    pipelineInput = {
+      runId,
+      traceId: typeof traceId === "string" && traceId.length > 0 ? traceId : randomUUID(),
+      resume: plano.data,
+    };
+  } else {
+    const file = formData.get("file");
+
+    if (!(file instanceof File)) {
+      return NextResponse.json(
+        { error: { code: "MISSING_FILE", userMessage: "Envie um arquivo no campo \"file\"." } },
+        { status: 400 },
+      );
+    }
+
+    const bytes = Buffer.from(await file.arrayBuffer());
+    pipelineInput = {
+      runId: randomUUID(),
+      traceId: randomUUID(),
+      file: { name: file.name, size: file.size, type: file.type, bytes },
+      pauseAfterQueries: formData.get("mode") === "plan",
+    };
   }
-
-  const bytes = Buffer.from(await file.arrayBuffer());
 
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -86,14 +163,13 @@ export async function POST(request: Request) {
       };
 
       try {
-        for await (const event of runPipeline(
-          {
-            runId: randomUUID(),
-            traceId: randomUUID(),
-            file: { name: file.name, size: file.size, type: file.type, bytes },
-          },
-          { repository, llmProvider, crossFileLlmProvider, jurisprudenceProvider, signal: controller.signal },
-        )) {
+        for await (const event of runPipeline(pipelineInput, {
+          repository,
+          llmProvider,
+          crossFileLlmProvider,
+          jurisprudenceProvider,
+          signal: controller.signal,
+        })) {
           write(event);
         }
       } catch (cause) {
