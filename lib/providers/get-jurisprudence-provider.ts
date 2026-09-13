@@ -48,6 +48,8 @@ export function getJurisprudenceProvider(env: Partial<NodeJS.ProcessEnv> = proce
     baseUrl: env.TJPR_BASE_URL,
     pagination: paginationFromEnv(env),
     tipoDecisao: env.TJPR_TIPO_DECISAO?.trim() || undefined,
+    ambito: env.TJPR_AMBITO?.trim() || undefined,
+    idLocalPesquisa: env.TJPR_ID_LOCAL_PESQUISA?.trim() || undefined,
   });
   if (configuredProvider === "tjpr") {
     return tjpr;

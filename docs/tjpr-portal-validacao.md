@@ -73,8 +73,10 @@ Faça em um navegador comum, logado em nada, sem extensão de automação.
 - Data da inspeção: 2026-09-12.
 - URL do portal: `https://portal.tjpr.jus.br`.
 - Busca: `GET /jurisprudencia/publico/pesquisa.do` com os parâmetros:
-  `actionType=pesquisar`, `criterioPesquisa=<termo>`, `ambito=7`, `idLocalPesquisa=1`,
-  `idsTipoDecisaoSelecionados=3`, `segredoJustica=pesquisar com`.
+  `actionType=pesquisar`, `criterioPesquisa=<termo>`, `segredoJustica=pesquisar com`. Os quatro
+  parâmetros abaixo apareceram na tentativa inicial (Collection Postman fornecida pelo usuário em
+  2026-09-12), mas **nenhum é enviado por padrão** — ver a entrada de 2026-09-13 mais abaixo para
+  `ambito`/`idLocalPesquisa`, e a de `idsTipoDecisaoSelecionados` logo depois.
 - Paginação e tamanho de página: o parâmetro de próxima página é `pageNumber`. Evidência de
   2026-09-13: o HTML da busca contém links como
   `document.forms['pesquisaForm']['pageNumber'].value='2'`, e a chamada pública via GET com
@@ -107,6 +109,18 @@ Faça em um navegador comum, logado em nada, sem extensão de automação.
     **62** registros com `3` (todos classificados "Dúvida/exame de competência"), **182** com `2`,
     **243** sem o parâmetro. O código passou a não enviá-lo por padrão (`TJPR_TIPO_DECISAO`).
     **Pergunta que sobra para a inspeção manual: qual valor significa "Acórdão".**
+  - **`ambito=7`/`idLocalPesquisa=1` (herdados da mesma collection Postman) reduziam a contagem em
+    100-1.000x, e nunca foram confirmados por inspeção manual.** Achado em 2026-09-13, motivado por
+    relato do usuário de que a busca no sistema devolvia muito menos resultados que a mesma query
+    feita direto no portal. Medido ao vivo, mesmo termo, com vs. sem os dois parâmetros:
+    "danos morais" 2.060 → 1.082.081; "plano saude reajuste" 6 → 7.342; "mero aborrecimento
+    consumidor" 6 → 92.937. Sem eles a resposta continua no mesmo formato HTML (linhas com
+    `juris-tabela-ementa`, checkbox, href), então não é preciso mudar o parser. Removidos do
+    default pelo mesmo motivo de `idsTipoDecisaoSelecionados`: valor não confirmado que restringe
+    demais é pior que não filtrar. Opt-in via `TJPR_AMBITO`/`TJPR_ID_LOCAL_PESQUISA`.
+    **Mesma pergunta pendente para a inspeção manual: o que cada valor realmente significa** — sem
+    isso não dá pra saber se `ambito=7`/`idLocalPesquisa=1` correspondem a um recorte válido (ex.:
+    uma única comarca) que só não deveria ser o padrão, ou se são valores sem sentido nenhum.
   - `https://portal.tjpr.jus.br/jurisprudencia/promo/nenhum-registro/dados-estaticos.html?updateIdx=31`
     responde HTTP 200, mas é uma tabela estática de precedentes interamericanos/promocionais e não
     revelou parâmetros de paginação da busca jurisprudencial.

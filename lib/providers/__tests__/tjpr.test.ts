@@ -433,4 +433,37 @@ describe("TjprProvider — só publica o que é rastreável", () => {
     const url = new URL(String(fetchImpl.mock.calls[0]![0]));
     expect(url.searchParams.get("idsTipoDecisaoSelecionados")).toBe("2");
   });
+
+  /**
+   * Medido contra o portal em 2026-09-13: `ambito=7&idLocalPesquisa=1` (herdados de uma collection
+   * Postman, nunca confirmados por inspeção manual) derrubavam a contagem em 100-1000x contra o
+   * mesmo termo sem eles — "mero aborrecimento consumidor" caiu de 92.937 para 6. Mesmo raciocínio
+   * do tipo de decisão: valor não confirmado que restringe demais é pior que não filtrar.
+   */
+  it("não filtra por ambito/idLocalPesquisa enquanto os valores corretos não forem confirmados (HU-38)", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => htmlResponse(searchHtml));
+    const provider = createTjprProvider({ baseUrl: "https://portal.tjpr.jus.br", fetchImpl });
+
+    await provider.search({ query: "plano de saude" });
+
+    const url = new URL(String(fetchImpl.mock.calls[0]![0]));
+    expect(url.searchParams.has("ambito")).toBe(false);
+    expect(url.searchParams.has("idLocalPesquisa")).toBe(false);
+  });
+
+  it("envia ambito/idLocalPesquisa quando configurados", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => htmlResponse(searchHtml));
+    const provider = createTjprProvider({
+      baseUrl: "https://portal.tjpr.jus.br",
+      fetchImpl,
+      ambito: "7",
+      idLocalPesquisa: "1",
+    });
+
+    await provider.search({ query: "plano de saude" });
+
+    const url = new URL(String(fetchImpl.mock.calls[0]![0]));
+    expect(url.searchParams.get("ambito")).toBe("7");
+    expect(url.searchParams.get("idLocalPesquisa")).toBe("1");
+  });
 });

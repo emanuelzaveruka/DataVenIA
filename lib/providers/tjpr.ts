@@ -66,6 +66,12 @@ interface TjprProviderOptions {
    * Valor de `idsTipoDecisaoSelecionados`. Ausente por padrão — ver `buildSearchUrl`.
    */
   tipoDecisao?: string;
+  /**
+   * Valores de `ambito`/`idLocalPesquisa`. Ausentes por padrão — mesma razão de `tipoDecisao`, ver
+   * `buildSearchUrl`.
+   */
+  ambito?: string;
+  idLocalPesquisa?: string;
 }
 
 function providerError(params: {
@@ -237,14 +243,17 @@ function encodeLatin1QueryValue(value: string): string {
 function buildSearchUrl(
   query: JurisprudenceQuery,
   baseUrl: string,
-  options?: { pagination?: { config: TjprPaginationConfig; page: number }; tipoDecisao?: string },
+  options?: {
+    pagination?: { config: TjprPaginationConfig; page: number };
+    tipoDecisao?: string;
+    ambito?: string;
+    idLocalPesquisa?: string;
+  },
 ): string {
   const pagination = options?.pagination;
   const params: Array<[string, string]> = [
     ["actionType", "pesquisar"],
     ["criterioPesquisa", query.query],
-    ["ambito", "7"],
-    ["idLocalPesquisa", "1"],
     ["segredoJustica", "pesquisar com"],
   ];
 
@@ -257,6 +266,19 @@ function buildSearchUrl(
   // único que não exclui jurisprudência de mérito por engano.
   if (options?.tipoDecisao) {
     params.push(["idsTipoDecisaoSelecionados", options.tipoDecisao]);
+  }
+
+  // `ambito=7&idLocalPesquisa=1` estavam fixos aqui até 2026-09-13 (herdados de uma collection
+  // Postman, nunca confirmados por inspeção manual de HU-38) e derrubavam a contagem de resultados
+  // em 100-1000x contra o mesmo termo sem eles — medido ao vivo: "danos morais" caiu de 1.082.081
+  // para 2.060, "mero aborrecimento consumidor" de 92.937 para 6. Mesmo raciocínio de
+  // `idsTipoDecisaoSelecionados`: valor não confirmado que restringe demais é pior que não filtrar,
+  // então o padrão passou a ser não enviar nenhum dos dois.
+  if (options?.ambito) {
+    params.push(["ambito", options.ambito]);
+  }
+  if (options?.idLocalPesquisa) {
+    params.push(["idLocalPesquisa", options.idLocalPesquisa]);
   }
 
   if (query.filters?.periodStart) {
@@ -409,6 +431,8 @@ export function createTjprProvider(options: TjprProviderOptions = {}): Jurisprud
   const fetchImpl = options.fetchImpl ?? fetch;
   const pagination = options.pagination ?? DEFAULT_TJPR_PAGINATION;
   const tipoDecisao = options.tipoDecisao;
+  const ambito = options.ambito;
+  const idLocalPesquisa = options.idLocalPesquisa;
   const knownDecisionUrls = new Map<string, string>();
 
   async function runSearchAttempt(
@@ -417,6 +441,8 @@ export function createTjprProvider(options: TjprProviderOptions = {}): Jurisprud
     const firstUrl = buildSearchUrl(query, baseUrl, {
       pagination: { config: pagination, page: 0 },
       tipoDecisao,
+      ambito,
+      idLocalPesquisa,
     });
     // Sem o nome do parâmetro de página, pedir a página 2 devolveria a 1 de novo: uma página é o
     // máximo honesto. Com ele, o teto é o menor entre maxPages e o teto de itens coletados.
@@ -431,7 +457,12 @@ export function createTjprProvider(options: TjprProviderOptions = {}): Jurisprud
       const url =
         page === 0
           ? firstUrl
-          : buildSearchUrl(query, baseUrl, { pagination: { config: pagination, page }, tipoDecisao });
+          : buildSearchUrl(query, baseUrl, {
+              pagination: { config: pagination, page },
+              tipoDecisao,
+              ambito,
+              idLocalPesquisa,
+            });
       const html = await fetchHtml(fetchImpl, url, "tjpr.search");
       // Falha na primeira página é falha da busca; numa página seguinte, é motivo para parar com
       // o que já veio — descartar duas páginas boas por causa da terceira seria pior.
