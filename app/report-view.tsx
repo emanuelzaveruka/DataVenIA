@@ -185,7 +185,10 @@ function PrecedentSection({
           {items.map((item) => (
             <li
               key={item.evidenceId}
-              className="rounded-md border border-ink-300 p-3 text-sm dark:border-ink-700"
+              // Um precedente separado da citação que o sustenta perde o sentido. `bloco-indivisivel`
+              // só age na impressão e é pontual de propósito: a regra antiga valia para TODA section
+              // e li, e um bloco maior que a página era empurrado inteiro, deixando folha em branco.
+              className="bloco-indivisivel rounded-md border border-ink-300 p-3 text-sm dark:border-ink-700"
             >
               <p className="font-medium">{item.argument}</p>
               <blockquote className="mt-2 border-l-2 border-ink-500 pl-3 text-ink-600 dark:border-ink-500 dark:text-ink-400">

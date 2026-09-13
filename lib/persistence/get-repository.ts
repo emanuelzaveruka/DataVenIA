@@ -2,7 +2,24 @@ import { createInMemoryRepository } from "./in-memory-repository";
 import { createSupabaseRepository } from "./supabase-repository";
 import type { DataVeniaRepository } from "./repository";
 
-let cached: DataVeniaRepository | undefined;
+/**
+ * O repositório em memória vive no `globalThis`, não numa variável de módulo.
+ *
+ * Parece exagero e não é: o Next empacota cada rota no seu próprio grafo de módulos, então uma
+ * variável de módulo dá UMA INSTÂNCIA POR ROTA. Na prática, o que `/api/documents` gravava era
+ * invisível para `/api/reports/[runId]/pdf` — o download do relatório respondia "execução não
+ * encontrada" para uma execução que tinha acabado de rodar. `Symbol.for` sobrevive a recarga de
+ * módulo no dev e ao code-splitting em produção.
+ *
+ * Isso NÃO substitui persistência real: continua morrendo com o processo e continua sem valer em
+ * serverless com várias instâncias. Só faz o modo em memória cumprir o que sempre prometeu — uma
+ * instância por processo.
+ */
+const CHAVE_GLOBAL = Symbol.for("datavenia.repositorio-em-memoria");
+
+type GlobalComRepositorio = typeof globalThis & {
+  [CHAVE_GLOBAL]?: DataVeniaRepository;
+};
 
 /**
  * Único ponto de seleção de storage (mirror de `getLlmProvider` e `getJurisprudenceProvider`).
@@ -25,13 +42,14 @@ export function getRepository(env: NodeJS.ProcessEnv = process.env): DataVeniaRe
 
   if (url && serviceRoleKey) return createSupabaseRepository({ url, serviceRoleKey });
 
-  // O repositório em memória é stateful: uma instância por processo, senão cada chamada perderia
-  // o que a anterior gravou.
-  cached ??= createInMemoryRepository();
-  return cached;
+  // Stateful: uma instância por PROCESSO, senão cada chamada — e cada rota — perderia o que a
+  // anterior gravou.
+  const global = globalThis as GlobalComRepositorio;
+  global[CHAVE_GLOBAL] ??= createInMemoryRepository();
+  return global[CHAVE_GLOBAL];
 }
 
 /** Usado por testes que precisam de um processo "limpo" entre casos. */
 export function resetRepositoryCache(): void {
-  cached = undefined;
+  delete (globalThis as GlobalComRepositorio)[CHAVE_GLOBAL];
 }
