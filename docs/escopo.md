@@ -47,8 +47,9 @@ tornar rastreável — §10 exige decisão explícita, nunca por omissão).
   (`docs/PrototipoNovoFront/`). Quatro itens ficam **fora das 38 HUs** e entram como proposta visual,
   com aviso na própria tela e sem backend: (a) **histórico de pesquisas** (`/historico`, que substitui
   a tela "Acesso" do protótipo — a tela de login NÃO entra, cadastro segue fora do escopo acima);
-  (b) **dashboard tabular de relatório** (`/relatorio`, com KPIs, distribuição, abas e filtros —
-  `/relatorio-demo` continua sendo a tela que confere HU-26/27/28 sobre a fixture); (c) **exportação
+  (b) **dashboard tabular de relatório** (`/relatorio` — **deixou de ser mock
+  em 13/09/2026, ver entrada abaixo**; `/relatorio-demo` continua sendo a tela que confere
+  HU-26/27/28 sobre a fixture); (c) **exportação
   DOCX/XLSX**, visível e desabilitada; (d) **filtros de escopo de busca** no envio (Câmara, Período),
   interativos mas não aplicados à busca. Nada disso altera o pipeline Map→Reduce→Verify nem o que vai
   ao relatório.
@@ -63,6 +64,27 @@ tornar rastreável — §10 exige decisão explícita, nunca por omissão).
   Favorável" por relator). §3.10/HU-29 proíbem expor score interno como probabilidade de êxito. Foram
   implementados como contagem absoluta com denominador visível e rótulo qualitativo, mantendo o
   layout. Reverter para percentual exigiria mudar a HU, não o CSS.
+
+- **2026-09-13 — painel de números do relatório (implementado).** `/relatorio` passou a renderizar um
+  `FinalReport` **real**: o da última análise da aba (guardado em `sessionStorage`, que morre com ela
+  — HU-06) ou, na ausência dele, o relatório de demonstração, que também é real (Fases 6+7 sobre a
+  fixture). A tela **diz qual dos dois está em cena**; nenhum número é inventado.
+
+  A derivação vive em `lib/report/report-dashboard.ts`, função pura testada sem React: contagem por
+  câmara, por relator, por ano, posição das citações, período coberto e as omissões de HU-27. Não
+  altera o pipeline nem o `FinalReport` — só lê.
+
+  **Regra que o módulo existe para não quebrar**: contagem absoluta com denominador visível, nunca
+  razão, taxa ou score. §3.10/HU-29 proíbem sugerir probabilidade de êxito, e há teste que falha se
+  qualquer campo de percentual aparecer no view-model.
+
+  **Adição fora das 38 HUs**: exportação **CSV** da tabela de precedentes (processo, tribunal,
+  câmara, relator, julgamento, posição, questão, fonte, citação). Exporta linhas, não agregados —
+  contagem pronta fora do produto viajaria sem o disclaimer ao lado. DOCX/XLSX seguem no backlog.
+
+  **Estado vazio é resultado, não erro**: quando a amostra não produz citação verificável, a tela diz
+  que as N decisões foram lidas e nenhuma respondeu às questões — para quem decide entrar com a ação,
+  "a jurisprudência disponível não fala sobre isso" é informação.
 
 Ver também HU-38 (plano de validação da fonte TJPR) para os limites do que pode ser feito com o
 portal público antes de qualquer decisão de integração real.

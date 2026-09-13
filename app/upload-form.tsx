@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useRef, type FormEvent } from "react";
 import type { PipelineStageEvent } from "../lib/workflow/pipeline-stage-event";
 import type { PipelineEvent, PipelineResultPayload } from "../lib/workflow/run-pipeline";
@@ -19,6 +20,7 @@ import { Rotulo } from "@/components/ui/rotulo";
 import { Marcador } from "@/components/ui/marcador";
 import { Dropzone } from "@/components/ui/dropzone";
 import { EscopoDaBusca } from "@/components/envio/escopo-da-busca";
+import { guardarRelatorio } from "@/components/relatorio/ultimo-relatorio";
 
 type UploadSuccess = PipelineResultPayload;
 
@@ -109,6 +111,14 @@ export function UploadForm() {
           case "result":
             sawTerminalEvent = true;
             setResult(event.payload);
+            // O painel de /relatorio lê daqui. Guardar no momento em que o resultado chega evita
+            // depender de o usuário continuar nesta tela — e morre com a aba, como HU-06 exige.
+            guardarRelatorio({
+              report: event.payload.report,
+              fileName: event.payload.fileName,
+              runId: event.payload.runId,
+              geradoEm: event.payload.report.generatedAt,
+            });
             break;
           case "error":
             sawTerminalEvent = true;
@@ -260,9 +270,17 @@ export function UploadForm() {
           <Cartao className="p-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <Rotulo>Documento processado</Rotulo>
-              <Botao type="button" variante="texto" onClick={() => setIsN8nModalOpen(true)}>
-                Visualizar orquestração
-              </Botao>
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href="/relatorio"
+                  className="inline-flex items-center rounded-controle bg-vn-acao px-5 py-[11px] text-apoio font-semibold text-white transition-colors ease-vn hover:bg-vn-acao-hover hover:text-white"
+                >
+                  Ver painel de números →
+                </Link>
+                <Botao type="button" variante="texto" onClick={() => setIsN8nModalOpen(true)}>
+                  Visualizar orquestração
+                </Botao>
+              </div>
             </div>
 
             <p className="mt-3 text-apoio text-vn-texto">
