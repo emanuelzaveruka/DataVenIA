@@ -9,6 +9,7 @@ import {
   type PrecedenteLinha,
   type RelatorioDashboard,
 } from "@/lib/report/report-dashboard";
+import { TRIBUNAL_PESQUISADO } from "@/lib/config/official-sources";
 import { assinarRelatorio, snapshotNoServidor, snapshotRelatorio } from "./ultimo-relatorio";
 import { Envelope } from "../layout/envelope";
 import { Secao } from "../layout/secao";
@@ -229,9 +230,37 @@ export function PainelRelatorio({ demo }: { demo: FinalReport }) {
                 {painel.caso.chamber && (
                   <div className="text-legenda text-vn-texto-suave">{painel.caso.chamber}</div>
                 )}
+                {painel.caso.court && (
+                  <div className="text-legenda text-vn-texto-suave">{painel.caso.court}</div>
+                )}
               </div>
             )}
           </div>
+
+          {/*
+            A peça pode ser de qualquer foro; a jurisprudência pesquisada é só do TJPR (HU-36).
+            Quando os dois não coincidem, dizer isso não é detalhe: sem o aviso, um relatório
+            construído sobre o acervo paranaense é lido como se fosse do tribunal da própria peça.
+          */}
+          <p className="mt-4 border-t border-vn-borda pt-4 text-legenda leading-relaxed text-vn-texto-suave">
+            {painel.caso.deOutroTribunal === true ? (
+              <>
+                <strong className="font-semibold text-vn-texto">
+                  Sua peça é do {painel.caso.court}; a jurisprudência pesquisada é do{" "}
+                  {TRIBUNAL_PESQUISADO}.
+                </strong>{" "}
+                Os precedentes abaixo vêm do acervo paranaense e podem não refletir o entendimento do
+                tribunal onde o seu processo corre.
+              </>
+            ) : (
+              <>
+                Jurisprudência pesquisada: <strong className="font-semibold text-vn-texto">
+                  {TRIBUNAL_PESQUISADO}
+                </strong>
+                , único tribunal coberto pelo produto.
+              </>
+            )}
+          </p>
         </Cartao>
 
         {semPrecedentes ? (

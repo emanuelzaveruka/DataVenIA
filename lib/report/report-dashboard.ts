@@ -1,3 +1,4 @@
+import { isTribunalDoParana } from "../config/official-sources";
 import type {
   FinalReport,
   ReportIssue,
@@ -90,6 +91,15 @@ export interface RelatorioDashboard {
     chamber?: string;
     pedidos: number;
     fatos: number;
+    /**
+     * A peça enviada é de fora do Paraná?
+     *
+     * `undefined` quando a peça não identifica o tribunal — "não diz" e "é de outro tribunal" são
+     * coisas diferentes, e só a segunda vale um aviso. A peça pode ser de qualquer foro; o que é
+     * TJPR-only é a jurisprudência pesquisada, e deixar essa assimetria implícita é o que faz
+     * alguém ler um relatório do acervo paranaense achando que é do tribunal da própria peça.
+     */
+    deOutroTribunal?: boolean;
   };
   amostra: {
     decisoesAnalisadas: number;
@@ -196,6 +206,10 @@ export function buildRelatorioDashboard(report: FinalReport): RelatorioDashboard
       chamber: report.caseSummary.chamber,
       pedidos: report.caseSummary.requests.length,
       fatos: report.caseSummary.facts.length,
+      deOutroTribunal: (() => {
+        const doParana = isTribunalDoParana(report.caseSummary.court);
+        return doParana === undefined ? undefined : !doParana;
+      })(),
     },
     amostra: {
       decisoesAnalisadas: report.sample.analyzedDecisions,

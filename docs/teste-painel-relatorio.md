@@ -39,38 +39,41 @@ questões daquelas peças. A tela explica isso em vez de mostrar tabela vazia �
 comportamento correto do produto, porque a regra que produz o vazio é a mesma que impede citação
 inventada. Some quando existir fonte real de jurisprudência (Fase 9, bloqueada em HU-38).
 
-## Dois pontos que precisam da sua decisão
+## Sanitização de nome de parte — corrigido
 
-### 1. Vazamento de nome de parte (HU-05) — prioridade alta
+O relatório saía com o nome real da autora em `caseSummary.parties`. Causa: o sanitizador só
+reconhecia parte apresentada com bloco de qualificação ("Fulana, brasileira, casada, portadora do
+RG…"), que é o formato da **petição**. Sentença declara as partes em tabela de autuação
+(`Requerente: Nome`), e por ali o nome passava intacto.
 
-O `FinalReport` da Sentença02 traz **o nome real da autora** em `caseSummary.parties.plaintiff`, e o
-relatório inteiro saiu sem nenhum marcador de sanitização.
+Corrigido em `e792e1e`. Três mudanças:
 
-Causa: `sanitize.ts` procura nome seguido de bloco de qualificação ("Fulano, brasileira, casada,
-portadora do RG..."). Nas sentenças do TJSP as partes vêm em cabeçalho tabular:
+1. Novo padrão para o cabeçalho, com o próprio rótulo decidindo `[AUTOR]`/`[RÉU]`.
+2. **Pessoa jurídica não é mascarada.** Empresa não é dado pessoal, e trocar "Unimed … Cooperativa"
+   por `[RÉU]` cegaria o Case Understanding sobre do que o caso trata. Sem marcador de forma
+   jurídica, o nome é mascarado — a falha é para o lado da privacidade.
+3. A propagação pelo resto da peça deixou de ser troca literal. A Sentença01 grafa
+   "Rosana Pantaroto Mesiano" no cabeçalho e "ROSANA PANTAROTO MESSIANO" no corpo — caixa diferente
+   e um S a mais. Agora compara normalizado (sem acento, caixa ou letra repetida).
 
-```
-Requerente: Shirley da Silva Miranda
-Requerido: Unimed de Marília Cooperativa de Trabalho Medico
-```
+Conferido nas três: nome da autora zerado em todas, empresas e juízes preservados. Rodando o
+pipeline completo na Sentença02, o relatório sai com `plaintiff: "[AUTOR]"` e nenhum traço do nome.
 
-Esse formato não casa com o padrão atual. **Não mexi no sanitizador** — é outro subsistema, e um
-regex mal calibrado ali pode mascarar demais e estragar a análise. Mas é decisão sua e é rápida:
-acrescentar um padrão para rótulos de cabeçalho (`Requerente:`, `Requerido:`, `Autor:`, `Réu:`,
-`Exequente:`, `Executado:`).
+Juiz continua visível de propósito: não é parte, e é proveniência do documento.
 
-Consequência prática enquanto não for feito: **o painel e o relatório exibem o nome real do cliente
-na tela**. O CSV exportado **não** — ele só leva dados de jurisprudência, que são públicos.
+## Tribunal da peça × tribunal pesquisado
 
-Por isso também **não commitei nenhum dos três relatórios como fixture de teste**: colocaria o nome
-de uma pessoa real no repositório. Os testes usam `buildDemoReport()`.
+O painel agora diz isso em vez de deixar implícito. A **peça** pode ser de qualquer foro; a
+**jurisprudência** é só TJPR (HU-36). Quando os dois não coincidem — como nas suas três, do TJSP —
+o cartão do topo avisa:
 
-### 2. As sentenças são do TJSP, não do TJPR
+> Sua peça é do Tribunal de Justiça do Estado de São Paulo; a jurisprudência pesquisada é do TJPR.
+> Os precedentes abaixo vêm do acervo paranaense e podem não refletir o entendimento do tribunal
+> onde o seu processo corre.
 
-As três são do Tribunal de Justiça de São Paulo, e são sentenças de 1º grau, não acórdãos. O produto
-está escopado para TJPR (`docs/escopo.md`), e outro tribunal exige decisão explícita. Para testar o
-painel isso não atrapalha — a peça de entrada pode ser de qualquer foro, é a jurisprudência buscada
-que é TJPR.
+Quando a peça é do Paraná (ou não identifica tribunal), aparece só "Jurisprudência pesquisada: TJPR,
+único tribunal coberto pelo produto". Nada foi restringido: o produto continua aceitando peça de
+qualquer tribunal.
 
 ## Rodar o pipeline sem navegador
 

@@ -22,3 +22,33 @@ export function isOfficialTjprUrl(url: string | undefined): boolean {
     return false;
   }
 }
+
+/**
+ * Nome do único tribunal que o produto pesquisa (HU-36, docs/escopo.md).
+ *
+ * A peça ENVIADA pode ser de qualquer foro — é o documento do cliente. O que é TJPR-only é a fonte
+ * de jurisprudência. Manter os dois no mesmo lugar evita a confusão de achar que o produto recusa
+ * peça de fora do Paraná.
+ */
+export const TRIBUNAL_PESQUISADO = "TJPR";
+
+/**
+ * O tribunal citado em texto livre é o TJPR?
+ *
+ * `CaseAnalysis.court` vem do modelo lendo a peça, então chega como "TJPR", "Tribunal de Justiça do
+ * Paraná" ou "Tribunal de Justiça do Estado do Paraná". A comparação é por normalização, não por
+ * igualdade: exigir uma grafia exata faria uma peça do Paraná ser anunciada como de outro tribunal.
+ *
+ * Ausência de tribunal devolve `undefined`, não `false` — "a peça não diz" e "a peça é de outro
+ * tribunal" são coisas diferentes, e só a segunda merece aviso na tela.
+ */
+export function isTribunalDoParana(court: string | undefined): boolean | undefined {
+  if (!court?.trim()) return undefined;
+
+  const normalizado = court
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  return /\btjpr\b/.test(normalizado) || /\bparana\b/.test(normalizado);
+}

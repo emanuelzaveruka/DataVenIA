@@ -179,3 +179,36 @@ describe("precedentesParaCsv", () => {
     expect(csv.startsWith("﻿")).toBe(true);
   });
 });
+
+/**
+ * A peça pode ser de qualquer foro — é o documento do cliente. A jurisprudência é só TJPR (HU-36).
+ * O painel precisa distinguir os dois, senão um relatório montado sobre o acervo paranaense é lido
+ * como se fosse do tribunal onde o processo corre.
+ */
+describe("tribunal da peça x tribunal pesquisado", () => {
+  function comTribunal(court?: string): FinalReport {
+    const base = relatorioVazio();
+    return { ...base, caseSummary: { ...base.caseSummary, court } };
+  }
+
+  it("marca a peça como de outro tribunal quando não é do Paraná", () => {
+    const painel = buildRelatorioDashboard(
+      comTribunal("Tribunal de Justiça do Estado de São Paulo"),
+    );
+    expect(painel.caso.deOutroTribunal).toBe(true);
+  });
+
+  it.each([
+    "TJPR",
+    "Tribunal de Justiça do Paraná",
+    "Tribunal de Justiça do Estado do Parana",
+  ])("reconhece %s como do Paraná, sem exigir grafia exata", (court) => {
+    expect(buildRelatorioDashboard(comTribunal(court)).caso.deOutroTribunal).toBe(false);
+  });
+
+  it("não afirma nada quando a peça não identifica o tribunal", () => {
+    // "não diz" não é "é de outro tribunal": só o segundo merece aviso na tela.
+    expect(buildRelatorioDashboard(comTribunal(undefined)).caso.deOutroTribunal).toBeUndefined();
+    expect(buildRelatorioDashboard(comTribunal("   ")).caso.deOutroTribunal).toBeUndefined();
+  });
+});
