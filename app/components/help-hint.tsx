@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import type { GlossaryEntry } from "../../lib/config/glossary";
 import type { PipelineStepStatus } from "../../lib/observability/pipeline-progress";
 
@@ -19,9 +19,15 @@ import type { PipelineStepStatus } from "../../lib/observability/pipeline-progre
  *    justamente o que o usuário pergunta. Quando há texto específico para o estado, ele aparece
  *    junto do texto geral, não no lugar dele.
  *
- * 3. **Cores só por token** (`ink-*`, `brand-green`), seguindo `app/page.tsx` e
- *    `app/report-view.tsx`. O modal do orquestrador usa a paleta crua do Tailwind e é a exceção
- *    do projeto, não o padrão.
+ * 3. **Cores só por token** (`vn-*`). O modal do orquestrador usa a paleta crua do Tailwind e é
+ *    a exceção do projeto, não o padrão.
+ *
+ * 4. **O painel se vira sozinho para caber na janela.** Ele abre para baixo por padrão, mas a
+ *    última etapa da lista costuma estar no rodapé da tela — e um tooltip que abre para fora da
+ *    viewport não é um detalhe estético, é a explicação ficando ilegível justamente para quem
+ *    clicou nela. Por isso a posição é MEDIDA na abertura (`getBoundingClientRect`) em vez de
+ *    fixa: falta espaço embaixo, abre para cima; falta espaço à direita, alinha pela direita.
+ *    CSS sozinho não resolve — `position: absolute` não conhece a viewport.
  */
 export function HelpHint({
   entry,
@@ -34,8 +40,49 @@ export function HelpHint({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
+  const [lado, setLado] = useState<{ acima: boolean; aDireita: boolean }>({
+    acima: false,
+    aDireita: false,
+  });
   const panelId = useId();
   const containerRef = useRef<HTMLSpanElement>(null);
+  const panelRef = useRef<HTMLSpanElement>(null);
+
+  /**
+   * Mede depois de pintar, antes do browser desenhar (`useLayoutEffect`): com `useEffect` o painel
+   * apareceria um quadro no lugar errado e pularia. A altura vem do próprio painel quando ele já
+   * existe; no primeiro quadro cai no palpite de 200px, que é a altura típica de uma entrada do
+   * glossário com nota de estado.
+   */
+  const posicionar = useCallback(() => {
+    const alvo = containerRef.current;
+    if (!alvo) return;
+    const caixa = alvo.getBoundingClientRect();
+    const altura = panelRef.current?.offsetHeight ?? 200;
+    const largura = panelRef.current?.offsetWidth ?? 320;
+
+    const espacoAbaixo = window.innerHeight - caixa.bottom;
+    const espacoAcima = caixa.top;
+    const espacoADireita = window.innerWidth - caixa.left;
+
+    setLado({
+      // só sobe se realmente couber em cima — senão descer e cortar um pouco é melhor do que
+      // subir e cortar no topo, onde fica o termo que nomeia a explicação.
+      acima: espacoAbaixo < altura + 12 && espacoAcima > espacoAbaixo,
+      aDireita: espacoADireita < largura + 12,
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    posicionar();
+    window.addEventListener("resize", posicionar);
+    window.addEventListener("scroll", posicionar, true);
+    return () => {
+      window.removeEventListener("resize", posicionar);
+      window.removeEventListener("scroll", posicionar, true);
+    };
+  }, [isOpen, posicionar]);
 
   const stateNote =
     status === "EMPTY"
@@ -86,11 +133,16 @@ export function HelpHint({
 
       {isOpen && (
         <span
+          ref={panelRef}
           id={panelId}
           role="tooltip"
-          className="absolute top-full left-0 z-50 mt-1.5 block w-[min(20rem,calc(100vw-2.5rem))] rounded-card border border-vn-borda border-l-[3px] border-l-vn-acao bg-vn-superficie p-4 text-left text-legenda leading-relaxed font-normal text-vn-texto shadow-[0_8px_24px_rgba(16,36,61,0.16)]"
+          className={[
+            "absolute z-50 block w-[min(20rem,calc(100vw-2.5rem))] rounded-card border border-vn-borda border-l-[3px] border-l-vn-acao bg-vn-superficie p-3.5 text-left text-[10px] leading-relaxed font-normal text-vn-texto shadow-[0_8px_24px_rgba(16,36,61,0.16)]",
+            lado.acima ? "bottom-full mb-1.5" : "top-full mt-1.5",
+            lado.aDireita ? "right-0" : "left-0",
+          ].join(" ")}
         >
-          <span className="block font-semibold">{entry.term}</span>
+          <span className="block text-[11px] font-semibold">{entry.term}</span>
           <span className="mt-1 block">{entry.what}</span>
           {stateNote && (
             <span className="mt-2.5 block border-t border-vn-borda pt-2.5 text-vn-texto-suave">
