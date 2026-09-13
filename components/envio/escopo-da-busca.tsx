@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { Cartao } from "../ui/cartao";
 import { Rotulo } from "../ui/rotulo";
 import { Campo, Selecao, RotuloCampo } from "../ui/campo";
-import { Chip } from "../ui/chip";
 import { Botao } from "../ui/botao";
 import { cn } from "../ui/cn";
 import { MAX_USER_KEYWORDS } from "../../lib/config/limits.client";
@@ -42,6 +41,51 @@ export function inicioDoPeriodo(anos: number): string | undefined {
   return data.toISOString().slice(0, 10);
 }
 
+/**
+ * Uma palavra-chave marcável — sugerida pela leitura da peça ou digitada pelo usuário. Mesmo
+ * componente para as duas origens (liga/desliga do mesmo jeito, mesmo teto de seleção); só a cor
+ * da borda muda, para o usuário distinguir "o sistema sugeriu" de "eu digitei" à primeira vista.
+ */
+function BotaoPalavraChave({
+  termo,
+  origem,
+  selecionada,
+  bloqueada,
+  onClick,
+}: {
+  termo: string;
+  origem: "sugestao" | "digitado";
+  selecionada: boolean;
+  bloqueada: boolean;
+  onClick: () => void;
+}) {
+  const digitado = origem === "digitado";
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={selecionada}
+      aria-label={digitado ? `${termo} (digitada por você)` : termo}
+      onClick={onClick}
+      disabled={bloqueada}
+      className={cn(
+        "inline-flex items-center gap-1.5 border px-2.5 py-1.5 text-rotulo transition-colors ease-vn",
+        selecionada
+          ? digitado
+            ? "border-vn-acao bg-vn-acao text-white"
+            : "border-vn-navy-800 bg-vn-navy-800 text-white"
+          : digitado
+            ? "border-vn-acao bg-transparent text-vn-texto hover:bg-vn-verde-100"
+            : "border-vn-borda bg-transparent text-vn-texto hover:border-vn-navy-800",
+        bloqueada && !selecionada && "cursor-not-allowed opacity-50 hover:bg-transparent",
+      )}
+    >
+      <span aria-hidden="true">{selecionada ? "✓" : "+"}</span>
+      {termo}
+    </button>
+  );
+}
+
 export function EscopoDaBusca({
   arquivo,
   termos,
@@ -65,10 +109,14 @@ export function EscopoDaBusca({
   const [avisoLeitura, setAvisoLeitura] = useState<string | null>(null);
   const [novoTermo, setNovoTermo] = useState("");
   const [sugestoes, setSugestoes] = useState<string[]>([]);
+  // Palavras digitadas pelo usuário — persistem como opção marcável, igual às sugestões, em vez de
+  // sumirem quando desmarcadas. Sem isto, desligar uma palavra digitada a perderia de vez.
+  const [digitados, setDigitados] = useState<string[]>([]);
 
   useEffect(() => {
     // Sem arquivo não há o que ler. Limpar os termos é responsabilidade de quem troca o arquivo
     // (o formulário), não deste efeito — aqui um setState síncrono só criaria um render a mais.
+    setDigitados([]);
     if (!arquivo) {
       setSugestoes([]);
       return;
@@ -105,11 +153,10 @@ export function EscopoDaBusca({
           );
           return;
         }
-        const sugeridas = corpo.terms ?? [];
-        setSugestoes(sugeridas);
-        // Pré-seleciona até o limite: quem não quer mexer em nada já sai com uma busca pronta;
-        // quem quer, desliga/liga cada sugestão abaixo.
-        onTermosChange(sugeridas.slice(0, MAX_USER_KEYWORDS));
+        setSugestoes(corpo.terms ?? []);
+        // Nada pré-selecionado: o usuário escolhe ativamente. Selecionar tudo até o teto de
+        // propósito deixava quem quisesse digitar a própria palavra sem campo disponível — o
+        // limite já vinha "batido" antes de qualquer ação.
       } catch (erro: unknown) {
         if (!ativo || (erro as Error)?.name === "AbortError") return;
         setAvisoLeitura("Não foi possível ler a peça para sugerir palavras-chave.");
@@ -128,22 +175,23 @@ export function EscopoDaBusca({
   }, [arquivo]);
 
   const noLimite = termos.length >= MAX_USER_KEYWORDS;
-  // Palavras digitadas pelo usuário que não vieram da sugestão — viram chips removíveis à parte,
-  // porque não têm uma sugestão correspondente para "desligar".
-  const termosDigitados = termos.filter((termo) => !sugestoes.includes(termo));
 
-  function alternarSugestao(sugestao: string) {
-    if (termos.includes(sugestao)) {
-      onTermosChange(termos.filter((item) => item !== sugestao));
+  function alternar(termo: string) {
+    if (termos.includes(termo)) {
+      onTermosChange(termos.filter((item) => item !== termo));
       return;
     }
     if (noLimite) return;
-    onTermosChange([...termos, sugestao]);
+    onTermosChange([...termos, termo]);
   }
 
   function acrescentar() {
     const termo = novoTermo.trim();
     if (!termo || noLimite) return;
+    const jaListado = [...sugestoes, ...digitados].some(
+      (existente) => existente.toLowerCase() === termo.toLowerCase(),
+    );
+    if (!jaListado) setDigitados((atual) => [...atual, termo]);
     if (!termos.some((existente) => existente.toLowerCase() === termo.toLowerCase())) {
       onTermosChange([...termos, termo]);
     }
@@ -161,32 +209,28 @@ export function EscopoDaBusca({
         </span>
       </div>
 
-      {sugestoes.length > 0 ? (
+      {sugestoes.length > 0 || digitados.length > 0 ? (
         <div className="flex flex-wrap gap-2">
-          {sugestoes.map((sugestao) => {
-            const selecionada = termos.includes(sugestao);
-            const bloqueada = !selecionada && (desabilitado || noLimite);
-            return (
-              <button
-                key={sugestao}
-                type="button"
-                role="checkbox"
-                aria-checked={selecionada}
-                onClick={() => alternarSugestao(sugestao)}
-                disabled={desabilitado || bloqueada}
-                className={cn(
-                  "inline-flex items-center gap-1.5 border px-2.5 py-1.5 text-rotulo transition-colors ease-vn",
-                  selecionada
-                    ? "border-vn-navy-800 bg-vn-navy-800 text-white"
-                    : "border-vn-borda bg-transparent text-vn-texto hover:border-vn-navy-800",
-                  bloqueada && "cursor-not-allowed opacity-50 hover:border-vn-borda",
-                )}
-              >
-                <span aria-hidden="true">{selecionada ? "✓" : "+"}</span>
-                {sugestao}
-              </button>
-            );
-          })}
+          {sugestoes.map((termo) => (
+            <BotaoPalavraChave
+              key={`sugestao-${termo}`}
+              termo={termo}
+              origem="sugestao"
+              selecionada={termos.includes(termo)}
+              bloqueada={desabilitado || (!termos.includes(termo) && noLimite)}
+              onClick={() => alternar(termo)}
+            />
+          ))}
+          {digitados.map((termo) => (
+            <BotaoPalavraChave
+              key={`digitado-${termo}`}
+              termo={termo}
+              origem="digitado"
+              selecionada={termos.includes(termo)}
+              bloqueada={desabilitado || (!termos.includes(termo) && noLimite)}
+              onClick={() => alternar(termo)}
+            />
+          ))}
         </div>
       ) : (
         <p className="text-legenda leading-relaxed text-vn-texto-suave">
@@ -196,23 +240,6 @@ export function EscopoDaBusca({
               : "Nenhuma palavra-chave sugerida. Digite as suas abaixo."
             : "Escolha um arquivo para ver as palavras-chave sugeridas."}
         </p>
-      )}
-
-      {termosDigitados.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {termosDigitados.map((termo) => (
-            <Chip
-              key={termo}
-              onRemover={
-                desabilitado
-                  ? undefined
-                  : () => onTermosChange(termos.filter((item) => item !== termo))
-              }
-            >
-              {termo}
-            </Chip>
-          ))}
-        </div>
       )}
 
       {avisoLeitura && (
