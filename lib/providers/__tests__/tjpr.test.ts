@@ -254,7 +254,9 @@ describe("TjprProvider — paginação (HU-13/HU-38)", () => {
   it("respeita o teto de itens coletados mesmo com páginas sobrando", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input) => {
       const page = Number(new URL(String(input)).searchParams.get("pagina"));
-      return htmlResponse(pageHtml([`${page}a`, `${page}b`, `${page}c`]));
+      // Ids numéricos porque é o que o portal usa — e desde a validação da URL de decisão um id
+      // não numérico não formaria um link abrível, logo o item nem seria publicado.
+      return htmlResponse(pageHtml([`${page}01`, `${page}02`, `${page}03`]));
     });
     const provider = createTjprProvider({
       baseUrl: "https://portal.tjpr.jus.br",
@@ -268,5 +270,63 @@ describe("TjprProvider — paginação (HU-13/HU-38)", () => {
     if (result.isError) return;
     expect(result.data.items).toHaveLength(4);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * As duas regras abaixo saíram de uma medição contra o portal em 2026-09-13, não de leitura de
+ * documentação: a URL canônica com o sufixo devolve 200, o atalho só com o id devolve 404, e
+ * `idsTipoDecisaoSelecionados=3` reduz `plano de saude` a 62 decisões de competência (243 sem o
+ * parâmetro).
+ */
+describe("TjprProvider — só publica o que é rastreável", () => {
+  const shortcutHtml = `
+<html><body>
+  <td>1 registro(s) encontrado(s)</td>
+  <tr class="even">
+    <td>
+      <input type="checkbox" name="idsSelecionados" value="4100000032734133">
+      <a href="/jurisprudencia/j/4100000032734133">0018288-78.2024.8.16.0019</a>
+      Data Julgamento: 16/05/2025
+    </td>
+    <td class="juris-tabela-ementa">Plano de saúde. Cobertura de exame.</td>
+  </tr>
+</body></html>`;
+
+  it("descarta a linha cujo href é o atalho sem sufixo, que o portal responde com 404", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => htmlResponse(shortcutHtml));
+    const provider = createTjprProvider({ baseUrl: "https://portal.tjpr.jus.br", fetchImpl });
+
+    const result = await provider.search({ query: "plano de saude" });
+
+    expect(result.isError).toBe(false);
+    if (result.isError) return;
+    // Publicar o item só adiaria o problema: ele gastaria uma chamada de modelo no Scratchpad para
+    // depois ser bloqueado por HU-27 no relatório, por não ter link abrível.
+    expect(result.data.items).toHaveLength(0);
+  });
+
+  it("não filtra por tipo de decisão enquanto o valor correto não for confirmado (HU-38)", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => htmlResponse(searchHtml));
+    const provider = createTjprProvider({ baseUrl: "https://portal.tjpr.jus.br", fetchImpl });
+
+    await provider.search({ query: "plano de saude" });
+
+    const url = new URL(String(fetchImpl.mock.calls[0]![0]));
+    expect(url.searchParams.has("idsTipoDecisaoSelecionados")).toBe(false);
+  });
+
+  it("envia o tipo de decisão quando configurado", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => htmlResponse(searchHtml));
+    const provider = createTjprProvider({
+      baseUrl: "https://portal.tjpr.jus.br",
+      fetchImpl,
+      tipoDecisao: "2",
+    });
+
+    await provider.search({ query: "plano de saude" });
+
+    const url = new URL(String(fetchImpl.mock.calls[0]![0]));
+    expect(url.searchParams.get("idsTipoDecisaoSelecionados")).toBe("2");
   });
 });

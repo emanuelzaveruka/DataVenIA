@@ -228,6 +228,10 @@ function ClaimSection({ title, claims }: { title: string; claims: ReportClaim[] 
 /**
  * HU-27 — a linha de origem é o caminho do achado até a fonte oficial: processo, Câmara, relator e
  * data ficam visíveis (não escondidos atrás do link), e o link abre a decisão no portal do TJPR.
+ *
+ * Se o achado chegou até aqui, ele tem metadado de origem completo e URL oficial de decisão — é a
+ * única condição em que este componente é chamado (`toReportSource`). O host aparece ao lado do
+ * link porque o rótulo fixo escondia a URL: um link quebrado só era descoberto ao clicar.
  */
 function SourceLine({ source }: { source: ReportSource }) {
   return (
@@ -240,9 +244,18 @@ function SourceLine({ source }: { source: ReportSource }) {
         className="underline underline-offset-2 hover:text-ink-900 dark:hover:text-ink-050"
       >
         Abrir decisão no portal do TJPR
-      </a>
+      </a>{" "}
+      <span className="text-ink-500 dark:text-ink-500">({hostOf(source.url)})</span>
     </span>
   );
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }
 
 function ReportFooter({ report }: { report: FinalReport }) {

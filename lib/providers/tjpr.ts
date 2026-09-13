@@ -7,6 +7,7 @@ import {
   SEARCH_MAX_PAGES,
   SEARCH_PAGE_SIZE,
 } from "../config/limits";
+import { TJPR_DECISION_PATH_PATTERN } from "../config/official-sources";
 
 const DEFAULT_TJPR_BASE_URL = "https://portal.tjpr.jus.br";
 const TJPR_ACCEPT_HEADER = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
@@ -66,6 +67,10 @@ interface TjprProviderOptions {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
   pagination?: TjprPaginationConfig;
+  /**
+   * Valor de `idsTipoDecisaoSelecionados`. Ausente por padrão — ver `buildSearchUrl`.
+   */
+  tipoDecisao?: string;
 }
 
 function providerError(params: {
@@ -101,9 +106,23 @@ function stripSessionId(url: string): string {
   return url.replace(/;jsessionid=[^?"'\s<>]*/i, "");
 }
 
-function absoluteUrl(value: string, baseUrl: string): string {
+/**
+ * Resolve o href da linha de resultado contra o portal e **recusa** o que não tiver o formato de uma
+ * página de decisão. Verificado contra o portal em 2026-09-13: só
+ * `/jurisprudencia/j/{id}/{classe}/{assunto}-{numeroProcesso}` responde 200; o atalho sem o sufixo
+ * responde 404. Um href truncado aqui viraria, lá na frente, um achado sem link abrível — depois de
+ * já ter gasto uma chamada de modelo no Scratchpad. Recusar na origem é mais barato e mais honesto.
+ */
+function decisionUrl(value: string, baseUrl: string): string | undefined {
   const decoded = decodeHtmlEntities(stripSessionId(value.trim()));
-  return new URL(decoded, baseUrl).toString();
+  let resolved: URL;
+  try {
+    resolved = new URL(decoded, baseUrl);
+  } catch {
+    return undefined;
+  }
+
+  return TJPR_DECISION_PATH_PATTERN.test(resolved.pathname) ? resolved.toString() : undefined;
 }
 
 function decodeHtmlEntities(value: string): string {
@@ -194,15 +213,26 @@ function toBrazilianDate(value: string | undefined): string | undefined {
 function buildSearchUrl(
   query: JurisprudenceQuery,
   baseUrl: string,
-  pagination?: { config: TjprPaginationConfig; page: number },
+  options?: { pagination?: { config: TjprPaginationConfig; page: number }; tipoDecisao?: string },
 ): string {
+  const pagination = options?.pagination;
   const url = new URL("/jurisprudencia/publico/pesquisa.do", baseUrl);
   url.searchParams.set("actionType", "pesquisar");
   url.searchParams.set("criterioPesquisa", query.query);
   url.searchParams.set("ambito", "7");
   url.searchParams.set("idLocalPesquisa", "1");
-  url.searchParams.set("idsTipoDecisaoSelecionados", "3");
   url.searchParams.set("segredoJustica", "pesquisar com");
+
+  // `idsTipoDecisaoSelecionados` é um filtro de verdade, e o valor `3` que estava fixo aqui era o
+  // errado: medido contra o portal em 2026-09-13, `plano de saude` devolve 62 registros com `3` —
+  // **todos** classificados "Dúvida/exame de competência", ou seja, decisões de competência da 1ª
+  // Vice-Presidência — contra 243 sem o parâmetro e 182 com `2`. Qual valor significa "Acórdão"
+  // ainda é pergunta para a inspeção manual de HU-38 (`docs/tjpr-portal-validacao.md`), e §9 proíbe
+  // descobrir por tentativa e erro; até lá, o padrão é não filtrar, que é o recorte mais amplo e o
+  // único que não exclui jurisprudência de mérito por engano.
+  if (options?.tipoDecisao) {
+    url.searchParams.set("idsTipoDecisaoSelecionados", options.tipoDecisao);
+  }
 
   if (query.filters?.periodStart) {
     url.searchParams.set("dataJulgamentoInicio", toBrazilianDate(query.filters.periodStart) ?? query.filters.periodStart);
@@ -272,6 +302,9 @@ function parseSearchItem(rowHtml: string, baseUrl: string): JurisprudenceSearchI
   if (!id || !rawHref || !processNumber) return undefined;
   if (!summary || /conte[uú]do pendente de an[aá]lise/i.test(summary)) return undefined;
 
+  const url = rawHref ? decisionUrl(rawHref, baseUrl) : undefined;
+  if (!url) return undefined;
+
   const title = firstMatch(rowHtml, /<font[^>]*class=["']competencia["'][^>]*>([\s\S]*?)<\/font>/i);
   const judgmentDate = parseBrazilianDate(firstMatch(rowHtml, /Data\s+Julgamento:\s*([\s\S]{0,120}?\d{2}\/\d{2}\/\d{4})/i));
 
@@ -282,7 +315,7 @@ function parseSearchItem(rowHtml: string, baseUrl: string): JurisprudenceSearchI
     court: "TJPR",
     judgmentDate,
     summary,
-    url: absoluteUrl(rawHref, baseUrl),
+    url,
     source: "TJPR",
   };
 }
@@ -338,6 +371,7 @@ export function createTjprProvider(options: TjprProviderOptions = {}): Jurisprud
   const baseUrl = options.baseUrl ?? DEFAULT_TJPR_BASE_URL;
   const fetchImpl = options.fetchImpl ?? fetch;
   const pagination = options.pagination ?? DEFAULT_TJPR_PAGINATION;
+  const tipoDecisao = options.tipoDecisao;
   const knownDecisionUrls = new Map<string, string>();
 
   return {
@@ -345,7 +379,10 @@ export function createTjprProvider(options: TjprProviderOptions = {}): Jurisprud
 
     async search(query: JurisprudenceQuery): Promise<ToolResult<JurisprudenceSearchResult>> {
       const startedAt = Date.now();
-      const firstUrl = buildSearchUrl(query, baseUrl, { config: pagination, page: 0 });
+      const firstUrl = buildSearchUrl(query, baseUrl, {
+        pagination: { config: pagination, page: 0 },
+        tipoDecisao,
+      });
       // Sem o nome do parâmetro de página, pedir a página 2 devolveria a 1 de novo: uma página é o
       // máximo honesto. Com ele, o teto é o menor entre maxPages e o teto de itens coletados.
       const maxPages = pagination.pageParam ? pagination.maxPages : 1;
@@ -356,7 +393,10 @@ export function createTjprProvider(options: TjprProviderOptions = {}): Jurisprud
       let pagesFetched = 0;
 
       for (let page = 0; page < maxPages; page += 1) {
-        const url = page === 0 ? firstUrl : buildSearchUrl(query, baseUrl, { config: pagination, page });
+        const url =
+          page === 0
+            ? firstUrl
+            : buildSearchUrl(query, baseUrl, { pagination: { config: pagination, page }, tipoDecisao });
         const html = await fetchHtml(fetchImpl, url, "tjpr.search");
         // Falha na primeira página é falha da busca; numa página seguinte, é motivo para parar com
         // o que já veio — descartar duas páginas boas por causa da terceira seria pior.

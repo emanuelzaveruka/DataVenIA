@@ -59,7 +59,14 @@ export async function POST(request: Request) {
     return errorResponse(pipelineUnexpectedError("getLlmProvider", cause));
   }
 
-  const jurisprudenceProvider = getJurisprudenceProvider();
+  // Mesmo tratamento dos demais: `JURISPRUDENCE_PROVIDER` escrito errado é erro de configuração, e
+  // vazar como 500 não tratado esconde a única informação útil — qual valor é inválido.
+  let jurisprudenceProvider;
+  try {
+    jurisprudenceProvider = getJurisprudenceProvider();
+  } catch (cause) {
+    return errorResponse(pipelineUnexpectedError("getJurisprudenceProvider", cause));
+  }
 
   // Também antes do primeiro byte: `PIPELINE_AUDIT` mal escrito é erro de configuração, e descobrir
   // isso no fim de uma execução inteira seria pior do que recusar agora.

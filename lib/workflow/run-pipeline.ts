@@ -629,6 +629,8 @@ export async function* runPipeline(
   const tSearch = Date.now();
   const foundItems: JurisprudenceSearchItem[] = [];
   const jurisprudenceSources = new Set<string>();
+  /** Buscas que a fixture respondeu no lugar da fonte configurada — ver o `[AVISO]` da etapa. */
+  const degradedSources: string[] = [];
   // Uma sub-tarefa por query: é o que permite abrir no navegador exatamente a mesma URL que o
   // código consultou e comparar o resultado com o portal, em vez de reconstruí-la à mão.
   const searchSubTasks: AgentTaskInfo[] = [];
@@ -661,6 +663,13 @@ export async function* runPipeline(
     }
     const searchProvider = searchResult.metadata?.source ?? sourceProvider.name;
     jurisprudenceSources.add(searchProvider);
+    // Só acontece no modo `tjpr+fixture`, que é opt-in: o provider primário falhou e a resposta veio
+    // do fallback. Precisa de aviso, não de uma string discreta no rodapé — a fixture nunca devolve
+    // vazio, então uma degradação despercebida entrega um relatório completo sobre acórdãos que não
+    // existem. Comparar com o nome do provider configurado é o que torna o desvio detectável.
+    if (sourceProvider.name !== "fixture" && searchProvider === "fixture" && !degradedSources.includes(searchQuery.query)) {
+      degradedSources.push(searchQuery.query);
+    }
 
     searchSubTasks.push({
       id: `busca-${searchSubTasks.length + 1}`,
@@ -752,6 +761,11 @@ export async function* runPipeline(
         `[INFO] ${uniqueItems.length} acórdãos encontrados; top ${selected.data.length} selecionados.`,
         ...(broadQueries.length > 0
           ? [`[AVISO] ${broadQueries.length} busca(s) muito ampla(s); refine por período, Câmara ou relator.`]
+          : []),
+        ...(degradedSources.length > 0
+          ? [
+              `[AVISO] A fonte configurada (${sourceProvider.name}) falhou em ${degradedSources.length} busca(s) e a fixture respondeu no lugar. Decisões de fixture são fictícias: não serão exibidas como fonte.`,
+            ]
           : []),
       ],
     }),
