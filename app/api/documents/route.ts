@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { getLlmProvider } from "../../../lib/llm/get-llm-provider";
 import { getJurisprudenceProvider } from "../../../lib/providers/get-jurisprudence-provider";
 import { getRepository } from "../../../lib/persistence/get-repository";
@@ -12,6 +13,17 @@ import {
 } from "../../../lib/workflow/run-pipeline";
 
 export const runtime = "nodejs";
+
+/** Teto de 20 e 120 caracteres: campo de termo, não caixa de texto livre para colar a peça. */
+const TermsSchema = z.array(z.string().trim().min(1).max(120)).max(20);
+
+function safeJsonParse(texto: string): unknown {
+  try {
+    return JSON.parse(texto);
+  } catch {
+    return undefined;
+  }
+}
 
 function errorResponse(error: AppError) {
   return NextResponse.json({ error }, { status: statusForError(error) });
@@ -60,6 +72,42 @@ export async function POST(request: Request) {
 
   const bytes = Buffer.from(await file.arrayBuffer());
 
+  /**
+   * Termos e recorte escolhidos na tela de envio. São opcionais: sem eles o pipeline roda
+   * exatamente como antes, com as queries que o modelo gerar.
+   *
+   * Entrada externa é validada, não confiada — mas aqui um campo malformado vira 400 em vez de ser
+   * ignorado em silêncio. Analisar a peça descartando o que o usuário digitou produziria um
+   * relatório que parece certo e não cobriu o que ele pediu, que é pior do que recusar.
+   */
+  const termosBrutos = formData.get("terms");
+  let extraTerms: string[] | undefined;
+
+  if (typeof termosBrutos === "string" && termosBrutos.trim().length > 0) {
+    const parsed = TermsSchema.safeParse(safeJsonParse(termosBrutos));
+    if (!parsed.success) {
+      return NextResponse.json(
+        {
+          error: {
+            code: "INVALID_SEARCH_TERMS",
+            userMessage: "Os termos de busca enviados não são válidos.",
+          },
+        },
+        { status: 400 },
+      );
+    }
+    extraTerms = parsed.data;
+  }
+
+  const judgingBody = formData.get("judgingBody");
+  const periodStart = formData.get("periodStart");
+  const filters =
+    typeof judgingBody === "string" && judgingBody.length > 0
+      ? { judgingBody, ...(typeof periodStart === "string" && periodStart ? { periodStart } : {}) }
+      : typeof periodStart === "string" && periodStart.length > 0
+        ? { periodStart }
+        : undefined;
+
   const controller = new AbortController();
   const abort = () => controller.abort();
   if (request.signal.aborted) abort();
@@ -91,6 +139,8 @@ export async function POST(request: Request) {
             runId: randomUUID(),
             traceId: randomUUID(),
             file: { name: file.name, size: file.size, type: file.type, bytes },
+            extraTerms,
+            filters,
           },
           { repository, llmProvider, crossFileLlmProvider, jurisprudenceProvider, signal: controller.signal },
         )) {

@@ -13,6 +13,12 @@ import { readNdjson } from "../lib/streaming/ndjson";
 import { ReportView } from "./report-view";
 import { N8nExecutionView } from "./components/n8n-execution-view";
 import { HelpHint } from "./components/help-hint";
+import { Cartao } from "@/components/ui/cartao";
+import { Botao } from "@/components/ui/botao";
+import { Rotulo } from "@/components/ui/rotulo";
+import { Marcador } from "@/components/ui/marcador";
+import { Dropzone } from "@/components/ui/dropzone";
+import { EscopoDaBusca, inicioDoPeriodo } from "@/components/envio/escopo-da-busca";
 
 type UploadSuccess = PipelineResultPayload;
 
@@ -44,6 +50,12 @@ export function UploadForm() {
   const [liveRun, setLiveRun] = useState<{ runId: string; traceId: string } | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Escopo escolhido antes de analisar. Mora aqui, e não no painel, porque é o envio que
+  // precisa dele — o painel só edita.
+  const [termos, setTermos] = useState<string[]>([]);
+  const [camara, setCamara] = useState("");
+  const [periodo, setPeriodo] = useState(0);
+
   function handleCancel() {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -70,6 +82,10 @@ export function UploadForm() {
     try {
       const formData = new FormData();
       formData.append("file", file);
+      if (termos.length > 0) formData.append("terms", JSON.stringify(termos));
+      if (camara) formData.append("judgingBody", camara);
+      const inicio = inicioDoPeriodo(periodo);
+      if (inicio) formData.append("periodStart", inicio);
 
       const response = await fetch("/api/documents", {
         method: "POST",
@@ -139,128 +155,154 @@ export function UploadForm() {
   const hasTimeline = timelineEvents.length > 0;
 
   return (
-    <div className="flex flex-col gap-4">
-      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-        <input
-          type="file"
-          accept=".pdf,.docx,.txt"
-          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-          className="rounded-lg border border-ink-500 bg-ink-100 p-2 text-sm text-ink-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-green dark:border-ink-500 dark:bg-ink-800 dark:text-ink-050"
-        />
-        <div className="flex gap-2">
-          {isSubmitting ? (
-            <div className="flex-1 flex gap-2">
-              <button
-                type="button"
-                disabled
-                className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-brand-navy px-4 py-2 text-sm font-medium text-brand-cream opacity-80 dark:bg-ink-050 dark:text-brand-navy"
-              >
-                <LoadingSpinner />
-                <span>Processando...</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleCancel}
-                className="rounded-lg bg-red-600 hover:bg-red-500 px-4 py-2 text-sm font-medium text-white shadow transition"
-              >
-                🚫 Cancelar
-              </button>
+    <div className="flex flex-col gap-6">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        {/* coluna principal — envio e execução */}
+        <div className="flex flex-col gap-5">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            <Dropzone
+              arquivo={file}
+              onArquivo={(novo) => {
+                // Sugestão pertence ao arquivo que a gerou: trocar a peça sem limpar deixaria
+                // termos do documento anterior irem junto na busca do novo.
+                setFile(novo);
+                setTermos([]);
+              }}
+              desabilitado={isSubmitting}
+            />
+
+            <div className="flex flex-wrap gap-2">
+              {isSubmitting ? (
+                <>
+                  <Botao type="button" variante="primaria" disabled className="flex-1">
+                    <LoadingSpinner />
+                    <span>Processando…</span>
+                  </Botao>
+                  <Botao type="button" variante="secundaria" onClick={handleCancel}>
+                    Cancelar
+                  </Botao>
+                </>
+              ) : (
+                <Botao type="submit" variante="primaria" disabled={!file} className="flex-1">
+                  Enviar documento
+                </Botao>
+              )}
+
+              {result || hasTimeline ? (
+                <Botao type="button" variante="secundaria" onClick={() => setIsN8nModalOpen(true)}>
+                  {isSubmitting ? "Acompanhar agentes" : "Ver delegação de agentes"}
+                </Botao>
+              ) : null}
             </div>
-          ) : (
-            <button
-              type="submit"
-              disabled={!file}
-              className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-brand-navy px-4 py-2 text-sm font-medium text-brand-cream focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-green disabled:opacity-40 dark:bg-ink-050 dark:text-brand-navy"
-            >
-              Enviar documento
-            </button>
+          </form>
+
+          {displayProgress && (
+            // sem `overflow-hidden`: o painel do HelpHint e absolute e estoura o card de
+            // proposito — recortar aqui esconderia justamente a explicacao da etapa.
+            <Cartao>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-vn-borda px-6 py-5">
+                <Rotulo>Execução do pipeline</Rotulo>
+                <Marcador tom={hasFailure ? "improcedente" : isSubmitting ? "parcial" : "procedente"}>
+                  {hasFailure ? "Falhou" : isSubmitting ? "Processando" : "Concluído"}
+                </Marcador>
+              </div>
+
+              <ol className="flex flex-col gap-4 px-6 py-6">
+                {displayProgress.map((step, index) => {
+                  // A etapa em curso é a primeira ainda não alcançada — mas só enquanto a execução
+                  // está viva: depois de uma falha, o giro do spinner mentiria sobre algo parado.
+                  //
+                  // O glossário é indexado por POSIÇÃO contra esta lista (PROGRESS_GLOSSARY_KEYS).
+                  // Reordenar as etapas aqui faz o "?" explicar a etapa errada, em silêncio.
+                  const helpKey = PROGRESS_GLOSSARY_KEYS[index];
+                  const isCurrentStep =
+                    isSubmitting &&
+                    !hasFailure &&
+                    step.status === "PENDING" &&
+                    (index === 0 || displayProgress[index - 1]?.status !== "PENDING");
+                  return (
+                    <li key={`${step.stage}-${step.label}`} className="flex items-start gap-3.5">
+                      {isCurrentStep ? (
+                        <LoadingSpinner className="mt-0.5 h-4 w-4 text-vn-acao" />
+                      ) : (
+                        <StatusMarca status={step.status} />
+                      )}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span
+                          className={
+                            isCurrentStep
+                              ? "text-apoio font-semibold text-vn-texto"
+                              : "text-apoio text-vn-texto-suave"
+                          }
+                        >
+                          {step.label}
+                          {typeof step.count === "number" ? (
+                            <span className="num font-semibold text-vn-texto"> ({step.count})</span>
+                          ) : (
+                            ""
+                          )}
+                        </span>
+                        {helpKey && <HelpHint entry={GLOSSARY[helpKey]} status={step.status} />}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            </Cartao>
           )}
-          {result || (hasTimeline && !isSubmitting) ? (
-            <button
-              type="button"
-              onClick={() => setIsN8nModalOpen(true)}
-              className="flex items-center justify-center gap-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 px-4 py-2 text-sm font-medium text-white shadow transition"
-            >
-              <span>🤖 Ver Delegação de Agentes</span>
-            </button>
-          ) : isSubmitting ? (
-            <button
-              type="button"
-              onClick={() => setIsN8nModalOpen(true)}
-              className="flex items-center justify-center gap-2 rounded-lg bg-indigo-900/60 hover:bg-indigo-900 text-indigo-200 border border-indigo-500/40 px-3 py-2 text-sm font-medium shadow transition"
-            >
-              <span>🤖 Acompanhar Agentes</span>
-            </button>
-          ) : null}
-        </div>
-      </form>
 
-      {displayProgress && (
-        <div className="flex flex-col gap-2 rounded-lg border border-ink-300 p-4 text-sm dark:border-ink-700">
-          <div className="flex items-center justify-between mb-1">
-            <span className="font-semibold text-ink-900 dark:text-ink-050">Progresso do Pipeline de Agentes</span>
-            <button
-              type="button"
-              onClick={() => setIsN8nModalOpen(true)}
-              className="text-xs bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 px-2.5 py-1 rounded font-medium flex items-center gap-1.5 transition"
-            >
-              <span>🤖 Abrir Orquestrador de Agentes</span>
-            </button>
-          </div>
-          <ul className="flex flex-col gap-2">
-            {displayProgress.map((step, index) => {
-              // A etapa em curso é a primeira ainda não alcançada — mas só enquanto a execução
-              // está viva: depois de uma falha, o giro do spinner mentiria sobre algo parado.
-              const helpKey = PROGRESS_GLOSSARY_KEYS[index];
-              const isCurrentStep =
-                isSubmitting &&
-                !hasFailure &&
-                step.status === "PENDING" &&
-                (index === 0 || displayProgress[index - 1]?.status !== "PENDING");
-              return (
-                <li key={`${step.stage}-${step.label}`} className="flex items-center gap-2.5">
-                  {isCurrentStep ? (
-                    <LoadingSpinner className="h-3.5 w-3.5 text-brand-navy dark:text-brand-cream" />
-                  ) : (
-                    <StatusDot status={step.status} />
-                  )}
-                  <span className={isCurrentStep ? "font-medium text-ink-900 dark:text-ink-050" : "text-ink-600 dark:text-ink-400"}>
-                    {step.label}
-                    {typeof step.count === "number" ? ` (${step.count})` : ""}
-                  </span>
-                  {helpKey && <HelpHint entry={GLOSSARY[helpKey]} status={step.status} />}
-                </li>
-              );
-            })}
-          </ul>
+          {errorMessage && (
+            <Cartao className="border-l-[3px] border-l-vn-critico p-5">
+              <p className="text-apoio leading-relaxed text-vn-texto">{errorMessage}</p>
+            </Cartao>
+          )}
         </div>
-      )}
 
-      {errorMessage && (
-        <p className="rounded-lg border border-danger bg-ink-100 p-3 text-sm text-danger dark:border-danger-dark dark:bg-ink-800 dark:text-danger-dark">
-          {errorMessage}
-        </p>
-      )}
+        {/* coluna lateral — escopo e privacidade */}
+        <div className="flex flex-col gap-5">
+          <EscopoDaBusca
+            arquivo={file}
+            termos={termos}
+            onTermosChange={setTermos}
+            camara={camara}
+            onCamaraChange={setCamara}
+            periodo={periodo}
+            onPeriodoChange={setPeriodo}
+            desabilitado={isSubmitting}
+          />
+
+          {/* uso funcional da cor de informação: é contexto, não alerta */}
+          <Cartao className="border-l-[3px] border-l-vn-info p-6">
+            <h3 className="mb-2 text-apoio font-bold">O que sai do seu documento</h3>
+            <p className="text-rotulo leading-relaxed text-vn-texto-suave">
+              CPF/CNPJ, endereço, telefone, e-mail e nomes de partes não essenciais são substituídos
+              antes de a peça seguir para análise. Os dados da sessão são descartados ao fechar o
+              navegador.
+            </p>
+          </Cartao>
+        </div>
+      </div>
 
       {result && (
-        <>
-          <div className="rounded-lg border border-ink-300 p-4 text-sm dark:border-ink-700">
-            <div className="flex items-center justify-between">
-              <p className="font-medium">Documento processado</p>
-              <button
-                type="button"
-                onClick={() => setIsN8nModalOpen(true)}
-                className="px-3 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 rounded text-xs font-semibold transition flex items-center gap-1"
-              >
-                🤖 Visualizar Orquestração
-              </button>
+        <div className="flex flex-col gap-6">
+          <Cartao className="p-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <Rotulo>Documento processado</Rotulo>
+              <Botao type="button" variante="texto" onClick={() => setIsN8nModalOpen(true)}>
+                Visualizar orquestração
+              </Botao>
             </div>
-            <p className="mt-1 text-ink-600 dark:text-ink-400">
-              {result.fileName} · {result.metadata.pageCount ? `${result.metadata.pageCount} página(s)` : ""}
+
+            <p className="mt-3 text-apoio text-vn-texto">
+              {result.fileName}
+              {result.metadata.pageCount ? (
+                <span className="num text-vn-texto-suave"> · {result.metadata.pageCount} página(s)</span>
+              ) : null}
             </p>
+
             {result.provider && (
-              <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-ink-600 dark:text-ink-400">
-                <span>
+              <p className="mt-2 flex flex-wrap items-center gap-1.5 text-legenda text-vn-texto-suave">
+                <span className="num">
                   Execução {result.runId} · {result.provider.llm}/{result.provider.model}
                 </span>
                 <HelpHint entry={GLOSSARY.execucaoLinha} />
@@ -268,37 +310,44 @@ export function UploadForm() {
                 <HelpHint entry={GLOSSARY.fonteJurisprudencia} />
               </p>
             )}
+
             {result.scratchpads && (
-              <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink-600 dark:text-ink-400">
-                <span>
+              <p className="mt-1 flex flex-wrap items-center gap-1.5 text-legenda text-vn-texto-suave">
+                <span className="num">
                   Scratchpads: {result.scratchpads.processed}/{result.scratchpads.requested}
                   {result.scratchpads.failed > 0 ? ` · ${result.scratchpads.failed} falha(s)` : ""}
                 </span>
                 <HelpHint entry={GLOSSARY.scratchpadsRatio} />
               </p>
             )}
+
             {result.redactions.length > 0 && (
-              <div className="mt-3">
-                <p className="text-ink-600 dark:text-ink-400">Dados pessoais mascarados antes da análise:</p>
-                <ul className="mt-1 list-disc pl-5">
+              <div className="mt-4 border-t border-vn-borda pt-4">
+                <Rotulo className="mb-2">Dados pessoais mascarados antes da análise</Rotulo>
+                <ul className="flex flex-wrap gap-2">
                   {result.redactions.map((r) => (
-                    <li key={`${r.type}-${r.marker}`}>
-                      {r.marker} × {r.count}
-                    </li>
+                    <Marcador key={`${r.type}-${r.marker}`} tom="neutro">
+                      <span className="num">
+                        {r.marker} × {r.count}
+                      </span>
+                    </Marcador>
                   ))}
                 </ul>
               </div>
             )}
-            <details className="mt-3">
-              <summary className="cursor-pointer text-ink-600 dark:text-ink-400">Ver prévia do texto sanitizado</summary>
-              <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-xs text-ink-600 dark:text-ink-400">
+
+            <details className="mt-4 border-t border-vn-borda pt-4">
+              <summary className="cursor-pointer text-rotulo text-vn-texto-suave">
+                Ver prévia do texto sanitizado
+              </summary>
+              <pre className="mt-3 max-h-64 overflow-auto border border-vn-borda bg-vn-papel-50 p-4 text-legenda whitespace-pre-wrap text-vn-texto-suave">
                 {result.sanitizedTextPreview}
               </pre>
             </details>
-          </div>
+          </Cartao>
 
           <ReportView report={result.report} />
-        </>
+        </div>
       )}
 
       <N8nExecutionView
@@ -317,24 +366,31 @@ export function UploadForm() {
  * Estado OPERACIONAL da etapa (§11.9) — aqui verde/vermelho são legítimos, porque descrevem a
  * execução, não resultado jurídico (docs/identidade-visual.md §5).
  *
- * O rótulo ao lado nomeia a etapa, mas não diz se ela terminou: sem o preenchimento vs. contorno e
- * sem o texto acessível, "concluída" e "pendente" seriam a mesma bolinha em escala de cinza e no
- * leitor de tela.
+ * A forma muda junto com a cor (quadrado cheio, contorno, ×): o rótulo ao lado nomeia a etapa, mas
+ * não diz se ela terminou, e sem forma + texto acessível "concluída" e "pendente" seriam a mesma
+ * marca em escala de cinza e no leitor de tela.
  */
-function StatusDot({ status }: { status: PipelineStepStatus }) {
+function StatusMarca({ status }: { status: PipelineStepStatus }) {
   // EMPTY fica em neutro de propósito: "rodou e não achou nada" costuma ser a regra
   // anti-alucinação funcionando, não defeito — pintar de vermelho acusaria a aplicação de um erro
-  // que não houve. Só FAILED é vermelho, e ele existe justamente para não sobrar como pendente.
-  const { shape, label } =
+  // que não houve. Só FAILED é crítico, e ele existe justamente para não sobrar como pendente.
+  const { classe, glifo, label } =
     status === "DONE"
-      ? { shape: "bg-green-ink dark:bg-green-light", label: "concluída" }
+      ? { classe: "bg-vn-acao text-white", glifo: "✓", label: "concluída" }
       : status === "FAILED"
-        ? { shape: "bg-danger dark:bg-danger-dark", label: "falhou" }
+        ? { classe: "bg-vn-critico text-white", glifo: "×", label: "falhou" }
         : status === "EMPTY"
-          ? { shape: "border-2 border-ink-500 bg-ink-500/40", label: "rodou sem resultado" }
-          : { shape: "border-2 border-ink-500", label: "pendente" };
+          ? { classe: "border-2 border-vn-navy-400 bg-vn-navy-100 text-vn-navy-600", glifo: "–", label: "rodou sem resultado" }
+          : { classe: "border-2 border-vn-papel-400 text-transparent", glifo: "·", label: "pendente" };
+
   return (
-    <span role="img" aria-label={label} className={`h-2.5 w-2.5 shrink-0 rounded-full ${shape}`} />
+    <span
+      role="img"
+      aria-label={label}
+      className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center text-[11px] font-extrabold ${classe}`}
+    >
+      <span aria-hidden="true">{glifo}</span>
+    </span>
   );
 }
 
@@ -347,14 +403,7 @@ function LoadingSpinner({ className = "h-4 w-4" }: { className?: string }) {
       viewBox="0 0 24 24"
       aria-hidden="true"
     >
-      <circle
-        className="opacity-25"
-        cx="12"
-        cy="12"
-        r="10"
-        stroke="currentColor"
-        strokeWidth="4"
-      />
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
       <path
         className="opacity-75"
         fill="currentColor"
