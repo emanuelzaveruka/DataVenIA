@@ -18,7 +18,7 @@ import { Botao } from "@/components/ui/botao";
 import { Rotulo } from "@/components/ui/rotulo";
 import { Marcador } from "@/components/ui/marcador";
 import { Dropzone } from "@/components/ui/dropzone";
-import { EscopoDaBusca, inicioDoPeriodo } from "@/components/envio/escopo-da-busca";
+import { EscopoDaBusca } from "@/components/envio/escopo-da-busca";
 
 type UploadSuccess = PipelineResultPayload;
 
@@ -50,12 +50,6 @@ export function UploadForm() {
   const [liveRun, setLiveRun] = useState<{ runId: string; traceId: string } | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Escopo escolhido antes de analisar. Mora aqui, e não no painel, porque é o envio que
-  // precisa dele — o painel só edita.
-  const [termos, setTermos] = useState<string[]>([]);
-  const [camara, setCamara] = useState("");
-  const [periodo, setPeriodo] = useState(0);
-
   function handleCancel() {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -82,10 +76,6 @@ export function UploadForm() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      if (termos.length > 0) formData.append("terms", JSON.stringify(termos));
-      if (camara) formData.append("judgingBody", camara);
-      const inicio = inicioDoPeriodo(periodo);
-      if (inicio) formData.append("periodStart", inicio);
 
       const response = await fetch("/api/documents", {
         method: "POST",
@@ -160,16 +150,7 @@ export function UploadForm() {
         {/* coluna principal — envio e execução */}
         <div className="flex flex-col gap-5">
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <Dropzone
-              arquivo={file}
-              onArquivo={(novo) => {
-                // Sugestão pertence ao arquivo que a gerou: trocar a peça sem limpar deixaria
-                // termos do documento anterior irem junto na busca do novo.
-                setFile(novo);
-                setTermos([]);
-              }}
-              desabilitado={isSubmitting}
-            />
+            <Dropzone arquivo={file} onArquivo={setFile} desabilitado={isSubmitting} />
 
             <div className="flex flex-wrap gap-2">
               {isSubmitting ? (
@@ -260,16 +241,7 @@ export function UploadForm() {
 
         {/* coluna lateral — escopo e privacidade */}
         <div className="flex flex-col gap-5">
-          <EscopoDaBusca
-            arquivo={file}
-            termos={termos}
-            onTermosChange={setTermos}
-            camara={camara}
-            onCamaraChange={setCamara}
-            periodo={periodo}
-            onPeriodoChange={setPeriodo}
-            desabilitado={isSubmitting}
-          />
+          <EscopoDaBusca />
 
           {/* uso funcional da cor de informação: é contexto, não alerta */}
           <Cartao className="border-l-[3px] border-l-vn-info p-6">

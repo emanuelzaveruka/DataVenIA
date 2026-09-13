@@ -33,8 +33,6 @@ import type { LlmProvider } from "../llm/provider";
 import type { JurisprudenceProvider } from "../providers/jurisprudence-provider";
 import type { FinalReport } from "../schemas/report.schema";
 import type { RedactionSummary } from "../schemas/sanitization.schema";
-import type { SearchQuery } from "../schemas/query-generation.schema";
-import type { JurisprudenceQueryFilters } from "../schemas/search.schema";
 
 const INITIAL_STAGE = "DOCUMENT_ANALYSIS" as const;
 
@@ -67,15 +65,6 @@ export interface RunPipelineInput {
   runId: string;
   traceId: string;
   file: PipelineFileInput;
-  /**
-   * Termos escritos pelo usuário na tela de envio. **Somam** às queries de `generateSearchQueries`,
-   * nunca as substituem — é o que mantém de graça a garantia de HU-11 (existe busca por
-   * jurisprudência contrária) sem precisar validar nada do que o usuário digitou: o conjunto do
-   * modelo continua inteiro ali dentro.
-   */
-  extraTerms?: string[];
-  /** Recorte escolhido pelo usuário (Câmara, período). Vale para TODAS as queries do plano. */
-  filters?: JurisprudenceQueryFilters;
 }
 
 export interface RunPipelineDeps {
@@ -175,7 +164,6 @@ export async function* runPipeline(
   const { repository, llmProvider, jurisprudenceProvider: sourceProvider, signal } = deps;
   const crossFileLlmProvider = deps.crossFileLlmProvider ?? llmProvider;
   const { runId, traceId, file } = input;
-  const filtrosDoUsuario = input.filters;
 
   const recorder = createStageRecorder();
   const startedAt = new Date().toISOString();
@@ -478,45 +466,22 @@ export async function* runPipeline(
   }
   currentStage = "SEARCH";
 
-  /**
-   * Termos do usuário viram queries como as outras, com `intent: "RELATED"` — não são a tese dele
-   * nem a contrária, são recortes que ele quer ver cobertos. Ficam amarrados à primeira questão
-   * jurídica identificada porque `legalIssueId` é obrigatório para rastreabilidade (HU-11) e quem
-   * digitou um termo solto não escolheu questão nenhuma.
-   */
-  const questaoPadrao = caseAnalysis.data.legalIssues[0]?.id;
-  const termosDoUsuario: SearchQuery[] = (input.extraTerms ?? [])
-    .map((termo) => termo.trim())
-    .filter((termo, indice, todos) => termo.length > 0 && todos.indexOf(termo) === indice)
-    .filter((termo) => !queryPlan.data.queries.some((existente) => existente.query === termo))
-    .map((termo) => ({
-      query: termo,
-      reason: "Termo informado pelo usuário na tela de envio.",
-      intent: "RELATED" as const,
-      legalIssueId: questaoPadrao ?? "",
-    }))
-    .filter((query) => query.legalIssueId.length > 0);
-
-  const queriesParaBuscar = [...queryPlan.data.queries, ...termosDoUsuario];
-
-  progress.queriesGenerated = queriesParaBuscar.length;
+  progress.queriesGenerated = queryPlan.data.queries.length;
   yield progressEvent();
 
   // ---------------------------------------------------------------- 07. Busca e pré-ranking
   const searchDetail = {
     id: NODE.search,
     nodeName: "07. Busca & Pre-Ranking (TJPR)",
-    input: { totalQueries: queriesParaBuscar.length, termosDoUsuario: termosDoUsuario.length },
+    input: { totalQueries: queryPlan.data.queries.length },
   };
   yield { type: "stage", event: recorder.start("SEARCH", "Busca Jurisprudencial", searchDetail) };
   const tSearch = Date.now();
   const foundItems: JurisprudenceSearchItem[] = [];
   const jurisprudenceSources = new Set<string>();
-  for (const searchQuery of queriesParaBuscar) {
+  for (const searchQuery of queryPlan.data.queries) {
     if (signal?.aborted) break;
-    // O recorte acompanha TODA query: o funil de HU-13 conta o total por busca, e aplicar em
-    // só algumas daria um total que não corresponde a recorte nenhum.
-    const query = { query: searchQuery.query, filters: filtrosDoUsuario };
+    const query = { query: searchQuery.query };
     const searchResult = await guardedExecution.run("searchJurisprudence", () =>
       jurisprudenceProvider.search(query),
     );
