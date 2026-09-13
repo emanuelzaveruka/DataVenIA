@@ -1,0 +1,106 @@
+/* ============================================================
+   Data VênIA — tokens de marca
+   Derivado de "Identidade DataVenIA" (padrão JCE SA Brazil)
+   Cole em app/globals.css, acima das diretivas do Tailwind.
+   ============================================================ */
+
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap");
+
+:root {
+  /* marca */
+  --vn-navy:    #10243D;
+  --vn-verde:   #129066;
+  --vn-creme:   #F4F2EC;
+
+  /* navy */
+  --vn-navy-100: #E8ECF2;
+  --vn-navy-200: #C9D2DF;
+  --vn-navy-300: #9DAAC0;
+  --vn-navy-400: #6E7F9B;
+  --vn-navy-500: #49586E;
+  --vn-navy-600: #2A4870;
+  --vn-navy-700: #1B3557;
+  --vn-navy-800: #10243D;
+  --vn-navy-900: #0A1829;
+
+  /* verde */
+  --vn-verde-100: #E4F3EC;
+  --vn-verde-200: #BFE5D3;
+  --vn-verde-300: #8FD3B4;
+  --vn-verde-400: #4FC894;
+  --vn-verde-500: #129066;
+  --vn-verde-600: #0D7351;
+  --vn-verde-700: #0A5A40;
+  --vn-verde-800: #07452F;
+  --vn-verde-900: #05301F;
+
+  /* papel */
+  --vn-papel-0:   #FFFFFF;
+  --vn-papel-50:  #F9F8F4;
+  --vn-papel-100: #F4F2EC;
+  --vn-papel-200: #E5E1D6;
+  --vn-papel-400: #CFC9BA;
+
+  /* semântico */
+  --vn-fundo:          var(--vn-papel-100);
+  --vn-superficie:     var(--vn-papel-0);
+  --vn-fundo-inverso:  var(--vn-navy-800);
+  --vn-texto:          var(--vn-navy-800);
+  --vn-texto-suave:    var(--vn-navy-500);
+  --vn-texto-inverso:  var(--vn-papel-100);
+  --vn-borda:          var(--vn-papel-200);
+  --vn-acao:           var(--vn-verde-500);
+  --vn-acao-hover:     var(--vn-verde-600);
+  --vn-acao-ativa:     var(--vn-verde-700);
+  --vn-acento-escuro:  var(--vn-verde-400);
+  --vn-foco:           0 0 0 3px rgba(18, 144, 102, .28);
+
+  --vn-sucesso:  #129066;
+  --vn-info:     #4697A8;
+  --vn-atencao:  #C39366;
+  --vn-critico:  #ED174F;
+
+  /* tipografia */
+  --vn-fonte: "Manrope", system-ui, sans-serif;
+  --vn-ts-display: 44px; --vn-ts-titulo: 28px; --vn-ts-sub: 20px;
+  --vn-ts-corpo: 16px; --vn-ts-apoio: 14px; --vn-ts-rotulo: 13px; --vn-ts-legenda: 12px;
+
+  /* forma e movimento */
+  --vn-raio-controle: 2px;
+  --vn-raio-card: 0px;
+  --vn-regua: 3px;
+  --vn-dur-rapida: 150ms;
+  --vn-dur-padrao: 220ms;
+  --vn-easing: cubic-bezier(.4, 0, .2, 1);
+}
+
+/* ------------------------------------------------------------
+   Primitivas de apoio — o que não cabe bem em utilitário solto
+   ------------------------------------------------------------ */
+
+/* Régua de acento de 3px que antecede todo título de seção */
+.vn-regua {
+  width: 56px;
+  height: var(--vn-regua);
+  background: var(--vn-acao);
+}
+
+/* Grafismo de círculos concêntricos do cabeçalho institucional.
+   Sempre sobre navy, sempre com borda navy-700, nunca preenchido. */
+.vn-grafismo { position: relative; overflow: hidden; }
+.vn-grafismo > .vn-grafismo-circulo {
+  position: absolute;
+  border-radius: 50%;
+  border: var(--vn-regua) solid var(--vn-navy-700);
+  pointer-events: none;
+}
+
+/* Anel de foco único do produto — verde 500 a 28% */
+.vn-foco:focus-visible {
+  outline: none;
+  border-color: var(--vn-acao);
+  box-shadow: var(--vn-foco);
+}
+
+/* Todo dado numérico usa numeral tabular */
+.vn-num { font-variant-numeric: tabular-nums; }

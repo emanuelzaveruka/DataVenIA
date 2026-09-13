@@ -1,68 +1,191 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap");
 @import "tailwindcss";
 
 /**
- * Tokens da identidade visual — docs/identidade-visual.md.
+ * Tokens da identidade visual — docs/identidade-visual.md + docs/PrototipoNovoFront/.
  *
- * As três primeiras cores foram amostradas do logo (docs/images/); o resto é derivado delas, e
- * todo contraste está medido no documento. Duas regras que o CSS sozinho não consegue impor:
+ * Este projeto usa Tailwind 4 (CSS-first). O `tailwind.config.ts` que acompanha o protótipo é
+ * sintaxe v3 e NÃO foi adicionado: os mesmos tokens vivem aqui, em `@theme`, que é a fonte única
+ * de verdade da qual o Tailwind deriva as utilitárias (`bg-vn-navy-800`, `text-vn-texto-suave`...).
  *
- * 1. `brand-green` NÃO é cor de texto (3,54:1 sobre cream, 3,92:1 sobre navy — reprova em AA).
- *    Para texto existem `green-ink` (claro) e `green-light` (escuro).
+ * Duas regras que o CSS sozinho não consegue impor:
+ *
+ * 1. `vn-verde-500` NÃO é cor de texto sobre creme (3,54:1 — reprova em AA). Para texto existem
+ *    `vn-verde-600`/`vn-verde-700` (sobre claro) e `vn-verde-400` (sobre navy).
  * 2. `stance-*` classifica posição jurídica e é CATEGÓRICA, nunca uma escala de aprovação — o
  *    produto é proibido de sugerir êxito (§3.10/HU-29). As três têm luminância pareada de
- *    propósito (~1,05:1 entre si), então cor nunca identifica classificação sozinha: sempre
- *    acompanhada de rótulo textual e forma.
+ *    propósito, então cor nunca identifica classificação sozinha: sempre com rótulo e forma.
  */
 @theme {
-  --color-brand-navy: #10243d;
-  --color-brand-cream: #f4f1ea;
-  --color-brand-green: #0e9165;
-  --color-green-ink: #0b6e4d;
-  --color-green-light: #2dd4a0;
+  /* marca */
+  --color-vn-navy: #10243d;
+  --color-vn-verde: #129066;
+  --color-vn-creme: #f4f2ec;
 
-  --color-ink-900: #10243d;
-  --color-ink-800: #22344b;
-  --color-ink-700: #39495c;
-  --color-ink-600: #5e6a78;
-  --color-ink-500: #828a94;
-  --color-ink-400: #a6abaf;
-  --color-ink-300: #c6c8c7;
-  --color-ink-200: #dddcd9;
-  --color-ink-100: #ebe9e3;
-  --color-ink-050: #f4f1ea;
+  --color-vn-navy-100: #e8ecf2;
+  --color-vn-navy-200: #c9d2df;
+  --color-vn-navy-300: #9daac0;
+  --color-vn-navy-400: #6e7f9b;
+  --color-vn-navy-500: #49586e;
+  --color-vn-navy-600: #2a4870;
+  --color-vn-navy-700: #1b3557;
+  --color-vn-navy-800: #10243d;
+  --color-vn-navy-900: #0a1829;
 
+  --color-vn-verde-100: #e4f3ec;
+  --color-vn-verde-200: #bfe5d3;
+  --color-vn-verde-300: #8fd3b4;
+  --color-vn-verde-400: #4fc894;
+  --color-vn-verde-500: #129066;
+  --color-vn-verde-600: #0d7351;
+  --color-vn-verde-700: #0a5a40;
+  --color-vn-verde-800: #07452f;
+  --color-vn-verde-900: #05301f;
+
+  --color-vn-papel-0: #ffffff;
+  --color-vn-papel-50: #f9f8f4;
+  --color-vn-papel-100: #f4f2ec;
+  --color-vn-papel-200: #e5e1d6;
+  --color-vn-papel-400: #cfc9ba;
+
+  /* semântico — preferir estes nas telas de produto */
+  --color-vn-fundo: #f4f2ec;
+  --color-vn-superficie: #ffffff;
+  --color-vn-fundo-inverso: #10243d;
+  --color-vn-texto: #10243d;
+  --color-vn-texto-suave: #49586e;
+  --color-vn-texto-inverso: #f4f2ec;
+  --color-vn-borda: #e5e1d6;
+  --color-vn-acao: #129066;
+  --color-vn-acao-hover: #0d7351;
+  --color-vn-acao-ativa: #0a5a40;
+
+  --color-vn-sucesso: #129066;
+  --color-vn-info: #4697a8;
+  --color-vn-atencao: #c39366;
+  --color-vn-critico: #ed174f;
+
+  /* classificação de posição jurídica (categórica, não escala) */
   --color-stance-supports: #1a5694;
   --color-stance-opposes: #5b4394;
   --color-stance-mixed: #14636b;
+
+  --color-danger: #b4341f;
+  --color-warn: #92400e;
+
+  /**
+   * Compatibilidade com as Fases 7/8 — NÃO usar em tela nova.
+   *
+   * `report-view`, `orchestrator-execution-view`, `help-hint` e o miolo do upload já funcionam e
+   * carregam `ink-*`/`brand-*`/`green-ink`/`*-dark` em dezenas de classes. Remover os tokens faria
+   * o Tailwind simplesmente não gerar essas utilitárias — a tela não quebra o build, ela perde o
+   * estilo em silêncio, que é pior. Os aliases abaixo reapontam cada um para o valor equivalente
+   * da paleta nova, então o componente herdado já nasce na cor certa sem ser reescrito.
+   *
+   * Os `*-dark` existem só porque o variant `dark:` ainda compila (ver @custom-variant abaixo);
+   * eles nunca chegam à tela. Cada um sai junto com o componente que for reescrito.
+   */
+  --color-brand-navy: #10243d;
+  --color-brand-cream: #f4f2ec;
+  --color-brand-green: #129066;
+  --color-green-ink: #0d7351;
+  --color-green-light: #4fc894;
+
+  --color-ink-900: #10243d;
+  --color-ink-800: #1b3557;
+  --color-ink-700: #2a4870;
+  --color-ink-600: #49586e;
+  --color-ink-500: #6e7f9b;
+  --color-ink-400: #9daac0;
+  --color-ink-300: #c9d2df;
+  --color-ink-200: #e5e1d6;
+  --color-ink-100: #f4f2ec;
+  --color-ink-050: #f9f8f4;
+
   --color-stance-supports-dark: #93c5fd;
   --color-stance-opposes-dark: #c4b5fd;
   --color-stance-mixed-dark: #7dd3dc;
-
-  --color-danger: #b4341f;
   --color-danger-dark: #fca5a5;
-  --color-warn: #92400e;
   --color-warn-dark: #fbbf7a;
+
+  --font-sans: "Manrope", system-ui, sans-serif;
+
+  /* escala tipográfica da marca */
+  --text-legenda: 12px;
+  --text-legenda--line-height: 1.5;
+  --text-rotulo: 13px;
+  --text-rotulo--line-height: 1.5;
+  --text-rotulo--letter-spacing: 0.12em;
+  --text-apoio: 14px;
+  --text-apoio--line-height: 1.55;
+  --text-corpo: 16px;
+  --text-corpo--line-height: 1.6;
+  --text-sub: 20px;
+  --text-sub--line-height: 1.35;
+  --text-titulo: 28px;
+  --text-titulo--line-height: 1.2;
+  --text-titulo--letter-spacing: -0.01em;
+  --text-display: 44px;
+  --text-display--line-height: 1.1;
+  --text-display--letter-spacing: -0.02em;
+
+  /* a marca é de cantos retos: não existe raio grande neste sistema */
+  --radius-controle: 2px;
+  --radius-card: 0px;
+
+  --spacing-regua: 3px;
+
+  --shadow-foco: 0 0 0 3px rgba(18, 144, 102, 0.28);
+
+  --ease-vn: cubic-bezier(0.4, 0, 0.2, 1);
+  --default-transition-duration: 220ms;
+
+  --container-leitura: 68ch;
+  --container-prosa: 62ch;
 }
 
 /**
- * Fundo e tinta da página. Antes disto o `body` não tinha cor definida: os componentes já traziam
- * variantes `dark:`, mas a página seguia branca nos dois temas, então o tema escuro existia pela
- * metade. Aqui ele passa a valer de fato.
+ * A identidade define navy como FUNDO INSTITUCIONAL, não como tema escuro alternativo
+ * (docs/PrototipoNovoFront/datavenia-prototipo.html, cabeçalho dos tokens). O produto tem um tema
+ * só, creme.
+ *
+ * Componentes herdados das fases anteriores (report-view, orchestrator view, help-hint) trazem
+ * dezenas de classes `dark:`. Em vez de caçá-las uma a uma — diff enorme, risco de quebrar o que
+ * funciona —, o variant é reapontado para uma classe `.dark` que nenhum elemento recebe: as
+ * utilitárias continuam compilando e simplesmente nunca ativam. Quando um componente for
+ * reescrito no novo design system, as `dark:` dele saem junto.
  */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @layer base {
   :root {
-    color-scheme: light dark;
+    color-scheme: light;
   }
 
   body {
-    background-color: var(--color-brand-cream);
-    color: var(--color-ink-900);
+    background-color: var(--color-vn-fundo);
+    color: var(--color-vn-texto);
+    font-family: var(--font-sans);
   }
 
-  @media (prefers-color-scheme: dark) {
-    body {
-      background-color: var(--color-brand-navy);
-      color: var(--color-ink-050);
-    }
+  :focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-foco);
+    border-color: var(--color-vn-acao);
+  }
+
+  a {
+    color: var(--color-vn-verde-600);
+  }
+
+  a:hover {
+    color: var(--color-vn-verde-700);
+  }
+}
+
+@layer utilities {
+  /* Todo dado numérico usa numeral tabular — colunas de tabela não dançam entre linhas. */
+  .num {
+    font-variant-numeric: tabular-nums;
   }
 }
