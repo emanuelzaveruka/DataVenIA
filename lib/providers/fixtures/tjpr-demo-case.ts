@@ -1,3 +1,4 @@
+import { FIXTURE_SOURCE_HOST } from "../../config/official-sources";
 import type { JurisprudenceSearchItem, RawDecision } from "../../schemas/search.schema";
 
 /**
@@ -6,17 +7,25 @@ import type { JurisprudenceSearchItem, RawDecision } from "../../schemas/search.
  * ("plano de saúde" retornou 3.970 resultados no portal).
  *
  * Dados 100% fictícios (partes, números de processo, magistrados) — nenhum corresponde a um
- * processo ou pessoa real. `url`/`sourceUrl` apontam para o domínio público real do TJPR
- * confirmado em `docs/tjpr-portal-validacao.md`, mas são placeholders ilustrativos, não links
- * verificados para uma decisão específica — a validação manual do portal (HU-38) ainda está
- * pendente. Não tratar como referência jurídica real.
+ * processo ou pessoa real.
+ *
+ * `url`/`sourceUrl` **não** usam o domínio do TJPR, e isso é a correção de um defeito real: até
+ * 2026-09-13 elas eram `https://portal.tjpr.jus.br/jurisprudencia/publico/#/decisao/fixture-00N`,
+ * que passava na allowlist de `lib/config/official-sources.ts` (só host e esquema, na época) e
+ * virava link clicável no relatório com o rótulo "Abrir decisão no portal do TJPR". Medido contra o
+ * portal: aquela base responde **HTTP 404**, e o fragmento `#/decisao/…` é rota inventada que nem
+ * chega ao servidor. Ou seja, toda fonte exibida em modo fixture era um acórdão fictício com link
+ * morto para o domínio oficial — exatamente o que HU-27 existe para impedir.
+ *
+ * Com um host declaradamente fictício, a decisão de demonstração não tem como se passar por fonte
+ * oficial: `isOfficialTjprUrl` a recusa, e o relatório a exibe marcada e sem link.
  */
 interface FixtureDecision {
   searchItem: JurisprudenceSearchItem;
   fullText: string;
 }
 
-const TJPR_PUBLIC_PORTAL_URL = "https://portal.tjpr.jus.br/jurisprudencia/publico/";
+const FIXTURE_DECISION_URL = `https://${FIXTURE_SOURCE_HOST}/decisao/`;
 
 const FIXTURE_DECISIONS: FixtureDecision[] = [
   {
@@ -30,7 +39,7 @@ const FIXTURE_DECISIONS: FixtureDecision[] = [
       judgmentDate: "2023-11-14",
       summary:
         "Responsabilidade objetiva da operadora de plano de saúde. Negativa indevida de cobertura de procedimento cirúrgico prescrito por médico assistente. Dano moral configurado. Recurso provido.",
-      url: `${TJPR_PUBLIC_PORTAL_URL}#/decisao/fixture-001`,
+      url: `${FIXTURE_DECISION_URL}fixture-001`,
       source: "TJPR",
     },
     fullText:
@@ -51,7 +60,7 @@ const FIXTURE_DECISIONS: FixtureDecision[] = [
       judgmentDate: "2023-08-02",
       summary:
         "Reajuste de mensalidade por mudança de faixa etária. Ausência de previsão contratual clara sobre o percentual. Abusividade reconhecida. Dano moral afastado por se tratar de mero inadimplemento contratual.",
-      url: `${TJPR_PUBLIC_PORTAL_URL}#/decisao/fixture-002`,
+      url: `${FIXTURE_DECISION_URL}fixture-002`,
       source: "TJPR",
     },
     fullText:
@@ -72,7 +81,7 @@ const FIXTURE_DECISIONS: FixtureDecision[] = [
       judgmentDate: "2022-05-20",
       summary:
         "Negativa de cobertura de home care sob alegação de exclusão contratual. Contrato anterior à Lei 9.656/98. Cláusula considerada abusiva por colocar o consumidor em desvantagem exagerada. Dano moral reconhecido.",
-      url: `${TJPR_PUBLIC_PORTAL_URL}#/decisao/fixture-003`,
+      url: `${FIXTURE_DECISION_URL}fixture-003`,
       source: "TJPR",
     },
     fullText:
@@ -92,7 +101,7 @@ const FIXTURE_DECISIONS: FixtureDecision[] = [
       judgmentDate: "2022-02-10",
       summary:
         "Negativa de cobertura por período de carência contratual regularmente pactuado, sem urgência ou emergência demonstrada. Cláusula válida. Improcedência mantida.",
-      url: `${TJPR_PUBLIC_PORTAL_URL}#/decisao/fixture-004`,
+      url: `${FIXTURE_DECISION_URL}fixture-004`,
       source: "TJPR",
     },
     fullText:
@@ -112,7 +121,7 @@ const FIXTURE_DECISIONS: FixtureDecision[] = [
       judgmentDate: "2021-09-30",
       summary:
         "Negativa de fornecimento de medicamento antineoplásico oral de uso domiciliar. Exclusão contratual expressa reconhecida como válida pela ausência de internação. Recurso desprovido.",
-      url: `${TJPR_PUBLIC_PORTAL_URL}#/decisao/fixture-005`,
+      url: `${FIXTURE_DECISION_URL}fixture-005`,
       source: "TJPR",
     },
     fullText:
@@ -132,7 +141,7 @@ const FIXTURE_DECISIONS: FixtureDecision[] = [
       judgmentDate: "2021-06-18",
       summary:
         "Discussão sobre taxatividade do rol de procedimentos da ANS. Negativa de cobertura de terapia não listada. Recurso desprovido por ausência de comprovação de ineficácia das alternativas listadas no rol.",
-      url: `${TJPR_PUBLIC_PORTAL_URL}#/decisao/fixture-006`,
+      url: `${FIXTURE_DECISION_URL}fixture-006`,
       source: "TJPR",
     },
     fullText:
@@ -152,7 +161,7 @@ const FIXTURE_DECISIONS: FixtureDecision[] = [
       judgmentDate: "2020-12-03",
       summary:
         "Atendimento de urgência dentro do período de carência. Limitação contratual de atendimento ambulatorial nas primeiras 24 horas considerada abusiva diante do quadro grave apresentado. Recurso provido.",
-      url: `${TJPR_PUBLIC_PORTAL_URL}#/decisao/fixture-007`,
+      url: `${FIXTURE_DECISION_URL}fixture-007`,
       source: "TJPR",
     },
     fullText:
@@ -171,7 +180,7 @@ const FIXTURE_DECISIONS: FixtureDecision[] = [
       judgmentDate: "2020-04-22",
       summary:
         "Pedido de reembolso integral de despesas realizadas fora da rede credenciada sem comprovação de urgência ou inexistência de prestador na rede. Reembolso limitado ao teto contratual. Recurso parcialmente provido.",
-      url: `${TJPR_PUBLIC_PORTAL_URL}#/decisao/fixture-008`,
+      url: `${FIXTURE_DECISION_URL}fixture-008`,
       source: "TJPR",
     },
     fullText:
@@ -191,7 +200,7 @@ const FIXTURE_DECISIONS: FixtureDecision[] = [
       judgmentDate: "2019-10-08",
       summary:
         "Cancelamento unilateral de plano coletivo empresarial sem notificação prévia adequada. Nulidade da rescisão. Restabelecimento do plano determinado. Dano moral reconhecido pela interrupção de tratamento em curso.",
-      url: `${TJPR_PUBLIC_PORTAL_URL}#/decisao/fixture-009`,
+      url: `${FIXTURE_DECISION_URL}fixture-009`,
       source: "TJPR",
     },
     fullText:

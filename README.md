@@ -92,20 +92,29 @@ Sem variáveis de ambiente:
 - a persistência usa o repositório em memória;
 - **[`/relatorio-demo`](http://localhost:3000/relatorio-demo)** roda as Fases 6 e 7 de verdade
   sobre essa fixture — cross-file, verificação de evidências e relatório final, sem rede e sem
-  modelo. É onde os critérios de aceite de HU-26/27/28 se conferem no navegador;
+  modelo. Como as decisões da fixture são inventadas, **nenhuma aparece como fonte**: cada achado
+  fica registrado em `report.omissions`, com o motivo. É a mesma regra que vale em produção — só se
+  exibe a fonte quando existe o metadado real de onde a informação saiu;
 - upload, validação e parsing de documento funcionam normalmente. O que **não** funciona sem
   credencial são os serviços que chamam LLM (Case Understanding, geração de queries, Scratchpads).
 
-Para testar com o portal real do TJPR:
+Para pesquisar no portal real do TJPR:
 
 ```bash
 JURISPRUDENCE_PROVIDER=tjpr
 # TJPR_BASE_URL=https://portal.tjpr.jus.br
 ```
 
-Nesse modo, o TJPR é primário e a fixture é fallback visível em `metadata.source`. A busca usa
-`GET /jurisprudencia/publico/pesquisa.do` e cada decisão é reaberta pela URL completa retornada no
-HTML da busca; `/jurisprudencia/j/{id}` sozinho não é assumido como URL válida.
+Nesse modo o TJPR é a **única** fonte: se o portal falhar, a execução falha. A fixture não entra
+como substituta, porque ela nunca devolve resultado vazio — uma degradação silenciosa entregaria um
+relatório inteiro, coerente e plausível, sobre 9 acórdãos que não existem. Para demonstrar o
+mecanismo de degradação de HU-12/HU-14, existe `JURISPRUDENCE_PROVIDER=tjpr+fixture`, que avisa em
+cada busca degradada.
+
+A busca usa `GET /jurisprudencia/publico/pesquisa.do` e cada decisão é reaberta pela URL completa
+retornada no HTML da busca — `/jurisprudencia/j/{id}` sozinho responde 404 no portal e nunca é
+assumido como URL válida. Um resultado cujo link não tenha esse formato é descartado na origem, em
+vez de virar um achado sem fonte abrível lá na frente.
 
 ### Com LLM
 
